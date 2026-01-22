@@ -1,359 +1,481 @@
 // Persephone - Content Script for grok.com
-// Monitors Grok responses and sends them to Telegram
+// Floating panel for manual chunk selection
 
 (function() {
   'use strict';
 
-  // State
   let enabled = false;
-  let processedMessages = new Set();
-  let initialLoadComplete = false;
-  let observer = null;
-  let pendingResponse = null;
-  let stabilityTimer = null;
+  let seenHashes = new Set();
+  let lastResponseId = null;
+  let checkInterval = null;
+  let chunks = [];
+  let panel = null;
 
-  // Configuration
-  const STABILITY_DELAY = 1500; // Wait for response to stabilize (stop streaming)
-  const INITIAL_LOAD_DELAY = 2000; // Wait before starting to track new messages
+  const DEBUG = true;
 
-  // Initialize
+  function debug(...args) {
+    if (DEBUG) console.log('[Persephone]', ...args);
+  }
+
   init();
 
   async function init() {
-    console.log('[Persephone] Initializing on grok.com');
+    debug('Initializing');
 
-    // Load settings
     const settings = await chrome.storage.sync.get(['enabled']);
     enabled = settings.enabled || false;
 
-    // Mark existing messages as processed (don't send old messages)
-    setTimeout(() => {
-      markExistingMessagesAsProcessed();
-      initialLoadComplete = true;
-      startObserving();
-      console.log('[Persephone] Ready - monitoring for new Grok responses');
-    }, INITIAL_LOAD_DELAY);
+    createPanel();
 
-    // Listen for settings changes
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    setTimeout(() => {
+      captureExistingContent();
+      startPolling();
+      debug('=== READY ===');
+    }, 3000);
+
+    chrome.runtime.onMessage.addListener((request) => {
       if (request.type === 'SETTINGS_UPDATED') {
         enabled = request.enabled;
-        console.log(`[Persephone] Auto-send ${enabled ? 'enabled' : 'disabled'}`);
       }
     });
   }
 
-  function markExistingMessagesAsProcessed() {
-    const messages = findGrokMessages();
-    messages.forEach(msg => {
-      const hash = hashMessage(msg.textContent);
-      processedMessages.add(hash);
+  function createPanel() {
+    panel = document.createElement('div');
+    panel.id = 'persephone-panel';
+    panel.innerHTML = `
+      <div class="p-header">
+        <span class="p-title">Persephone</span>
+        <div class="p-controls">
+          <button class="p-btn p-clear" title="Clear all">Clear</button>
+          <button class="p-btn p-minimize" title="Minimize">_</button>
+        </div>
+      </div>
+      <div class="p-chunks"></div>
+      <div class="p-actions">
+        <button class="p-btn p-send-selected">Send Selected</button>
+        <button class="p-btn p-send-all">Send All</button>
+      </div>
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #persephone-panel {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 350px;
+        max-height: 500px;
+        background: #1a1a2e;
+        border: 1px solid #3a3a5c;
+        border-radius: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        color: #eee;
+        z-index: 999999;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        display: flex;
+        flex-direction: column;
+      }
+      #persephone-panel.minimized {
+        max-height: 40px;
+        overflow: hidden;
+      }
+      #persephone-panel.minimized .p-chunks,
+      #persephone-panel.minimized .p-actions {
+        display: none;
+      }
+      .p-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        border-bottom: 1px solid #3a3a5c;
+        cursor: move;
+      }
+      .p-title {
+        font-weight: 600;
+        color: #a855f7;
+      }
+      .p-controls {
+        display: flex;
+        gap: 6px;
+      }
+      .p-btn {
+        background: #3a3a5c;
+        border: none;
+        color: #ccc;
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .p-btn:hover {
+        background: #4a4a6c;
+      }
+      .p-chunks {
+        flex: 1;
+        overflow-y: auto;
+        max-height: 350px;
+        padding: 8px;
+      }
+      .p-chunk {
+        display: flex;
+        gap: 8px;
+        padding: 8px;
+        margin-bottom: 6px;
+        background: #252542;
+        border-radius: 6px;
+        align-items: flex-start;
+      }
+      .p-chunk.sent {
+        opacity: 0.5;
+      }
+      .p-chunk input[type="checkbox"] {
+        margin-top: 3px;
+        accent-color: #a855f7;
+      }
+      .p-chunk-content {
+        flex: 1;
+        word-break: break-word;
+        max-height: 80px;
+        overflow: hidden;
+        line-height: 1.4;
+      }
+      .p-chunk-tag {
+        font-size: 10px;
+        color: #a855f7;
+        background: rgba(168, 85, 247, 0.2);
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-bottom: 4px;
+        display: inline-block;
+      }
+      .p-chunk-text {
+        color: #bbb;
+        font-size: 12px;
+      }
+      .p-chunk-send {
+        background: #a855f7;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .p-chunk-send:hover {
+        background: #9333ea;
+      }
+      .p-chunk-send:disabled {
+        background: #666;
+        cursor: not-allowed;
+      }
+      .p-actions {
+        display: flex;
+        gap: 8px;
+        padding: 10px;
+        border-top: 1px solid #3a3a5c;
+      }
+      .p-actions .p-btn {
+        flex: 1;
+      }
+      .p-send-selected {
+        background: #a855f7 !important;
+        color: white !important;
+      }
+      .p-send-selected:hover {
+        background: #9333ea !important;
+      }
+      .p-empty {
+        text-align: center;
+        color: #666;
+        padding: 20px;
+      }
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(panel);
+
+    // Event listeners
+    panel.querySelector('.p-minimize').addEventListener('click', () => {
+      panel.classList.toggle('minimized');
+      panel.querySelector('.p-minimize').textContent = panel.classList.contains('minimized') ? '□' : '_';
     });
-    console.log(`[Persephone] Marked ${processedMessages.size} existing messages as processed`);
+
+    panel.querySelector('.p-clear').addEventListener('click', clearChunks);
+    panel.querySelector('.p-send-selected').addEventListener('click', sendSelected);
+    panel.querySelector('.p-send-all').addEventListener('click', sendAll);
+
+    // Make draggable
+    makeDraggable(panel, panel.querySelector('.p-header'));
+
+    updateChunksUI();
   }
 
-  function findGrokMessages() {
-    // Grok's assistant messages - try multiple selectors for robustness
-    const selectors = [
-      '[data-testid="message-assistant"]',
-      '.message-assistant',
-      '[class*="assistant"]',
-      'div[class*="MessageContent"]',
-      // Common patterns in AI chat UIs
-      '.prose',
-      '.markdown-body',
-      '[data-message-author="assistant"]'
-    ];
+  function makeDraggable(element, handle) {
+    let offsetX, offsetY, isDragging = false;
 
-    for (const selector of selectors) {
-      const messages = document.querySelectorAll(selector);
-      if (messages.length > 0) {
-        return Array.from(messages);
+    handle.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      offsetX = e.clientX - element.getBoundingClientRect().left;
+      offsetY = e.clientY - element.getBoundingClientRect().top;
+      element.style.transition = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      element.style.left = (e.clientX - offsetX) + 'px';
+      element.style.top = (e.clientY - offsetY) + 'px';
+      element.style.right = 'auto';
+      element.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      element.style.transition = '';
+    });
+  }
+
+  function updateChunksUI() {
+    const container = panel.querySelector('.p-chunks');
+
+    if (chunks.length === 0) {
+      container.innerHTML = '<div class="p-empty">No chunks yet. Start a conversation with Grok.</div>';
+      return;
+    }
+
+    container.innerHTML = chunks.map((chunk, i) => `
+      <div class="p-chunk ${chunk.sent ? 'sent' : ''}" data-index="${i}">
+        <input type="checkbox" ${chunk.selected ? 'checked' : ''} ${chunk.sent ? 'disabled' : ''}>
+        <div class="p-chunk-content">
+          <div class="p-chunk-tag">&lt;${chunk.tag}&gt;</div>
+          <div class="p-chunk-text">${escapeHtml(chunk.text.substring(0, 150))}${chunk.text.length > 150 ? '...' : ''}</div>
+        </div>
+        <button class="p-chunk-send" ${chunk.sent ? 'disabled' : ''}>Send</button>
+      </div>
+    `).join('');
+
+    // Add event listeners
+    container.querySelectorAll('.p-chunk').forEach(el => {
+      const index = parseInt(el.dataset.index);
+
+      el.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+        chunks[index].selected = e.target.checked;
+      });
+
+      el.querySelector('.p-chunk-send').addEventListener('click', () => {
+        sendChunk(index);
+      });
+    });
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function addChunk(tag, text) {
+    chunks.push({
+      tag,
+      text,
+      selected: false,
+      sent: false
+    });
+    updateChunksUI();
+
+    // Scroll to bottom
+    const container = panel.querySelector('.p-chunks');
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function clearChunks() {
+    chunks = [];
+    updateChunksUI();
+  }
+
+  async function sendChunk(index) {
+    const chunk = chunks[index];
+    if (chunk.sent) return;
+
+    const success = await sendToTelegram(chunk.text);
+    if (success) {
+      chunk.sent = true;
+      chunk.selected = false;
+      updateChunksUI();
+    }
+  }
+
+  async function sendSelected() {
+    for (let i = 0; i < chunks.length; i++) {
+      if (chunks[i].selected && !chunks[i].sent) {
+        await sendChunk(i);
+        await sleep(100); // Small delay between sends
       }
     }
+  }
 
-    // Fallback: Look for message containers and filter by context
-    const allMessages = document.querySelectorAll('[class*="message"], [class*="Message"]');
-    return Array.from(allMessages).filter(el => {
-      const classes = el.className.toLowerCase();
-      return classes.includes('assistant') || classes.includes('grok') || classes.includes('bot');
+  async function sendAll() {
+    for (let i = 0; i < chunks.length; i++) {
+      if (!chunks[i].sent) {
+        await sendChunk(i);
+        await sleep(100);
+      }
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function captureExistingContent() {
+    document.querySelectorAll('[id^="response-"].items-start').forEach(resp => {
+      const markdown = resp.querySelector('.response-content-markdown');
+      if (markdown) {
+        markdown.querySelectorAll(':scope > *').forEach(child => {
+          const text = extractText(child);
+          if (text) seenHashes.add(hash(text));
+        });
+      }
+    });
+
+    const responses = document.querySelectorAll('[id^="response-"].items-start');
+    if (responses.length > 0) {
+      lastResponseId = responses[responses.length - 1].id;
+    }
+
+    debug(`Captured ${seenHashes.size} existing content hashes`);
+  }
+
+  function startPolling() {
+    checkInterval = setInterval(checkForNewContent, 500);
+  }
+
+  function checkForNewContent() {
+    const responses = document.querySelectorAll('[id^="response-"].items-start');
+    if (responses.length === 0) return;
+
+    const latestResponse = responses[responses.length - 1];
+
+    if (latestResponse.id !== lastResponseId) {
+      debug('🆕 New response detected:', latestResponse.id);
+      lastResponseId = latestResponse.id;
+    }
+
+    const markdown = latestResponse.querySelector('.response-content-markdown');
+    if (!markdown) return;
+
+    markdown.querySelectorAll(':scope > *').forEach(child => {
+      processElement(child);
     });
   }
 
-  function findLatestGrokMessage() {
-    const messages = findGrokMessages();
-    return messages.length > 0 ? messages[messages.length - 1] : null;
+  function processElement(element) {
+    const tag = element.tagName.toLowerCase();
+    if (['section', 'div', 'button', 'span'].includes(tag)) return;
+
+    const text = extractText(element);
+    if (!text || text.length < 3) return;
+
+    const h = hash(text);
+    if (seenHashes.has(h)) return;
+
+    seenHashes.add(h);
+    console.log(`[Persephone] ✅ <${tag}>:`, text);
+
+    // Add to panel instead of auto-sending
+    addChunk(tag, text);
   }
 
-  function isMessageStreaming(element) {
-    // Check for common streaming indicators
-    const streamingIndicators = [
-      '[class*="streaming"]',
-      '[class*="typing"]',
-      '[class*="loading"]',
-      '.cursor-blink',
-      '[data-streaming="true"]'
-    ];
+  function extractText(element) {
+    const tag = element.tagName.toLowerCase();
 
-    for (const selector of streamingIndicators) {
-      if (element.querySelector(selector) || element.matches(selector)) {
-        return true;
-      }
-    }
+    if (tag === 'p') return cleanText(element);
+    if (tag.startsWith('h')) return `*${cleanText(element)}*`;
+    if (tag === 'ul' || tag === 'ol') return formatList(element, tag);
+    if (tag === 'table') return formatTable(element);
+    if (tag === 'pre') return formatCode(element);
 
-    // Check if the element or its parent has streaming-related attributes
-    const hasStreamingAttr = element.closest('[data-streaming]') ||
-                            element.querySelector('[data-streaming]');
-    if (hasStreamingAttr) {
-      return hasStreamingAttr.getAttribute('data-streaming') === 'true';
-    }
-
-    return false;
+    return null;
   }
 
-  function extractMessageText(element) {
-    // Clone to avoid modifying the DOM
+  function cleanText(element) {
     const clone = element.cloneNode(true);
+    clone.querySelectorAll('button, svg, img, .citation, .no-copy, a[class*="citation"]')
+      .forEach(el => el.remove());
 
-    // Remove any UI elements that shouldn't be in the text
-    const uiElements = clone.querySelectorAll('button, [class*="action"], [class*="toolbar"]');
-    uiElements.forEach(el => el.remove());
-
-    // Get text content, preserving some structure
-    let text = '';
-
-    const walk = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent;
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = node.tagName.toLowerCase();
-
-        // Add line breaks for block elements
-        if (['p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
-          if (text && !text.endsWith('\n')) {
-            text += '\n';
-          }
-        }
-
-        // Handle code blocks
-        if (tag === 'pre' || tag === 'code') {
-          text += '```\n';
-        }
-
-        for (const child of node.childNodes) {
-          walk(child);
-        }
-
-        if (tag === 'pre' || tag === 'code') {
-          if (!text.endsWith('\n')) text += '\n';
-          text += '```\n';
-        }
-
-        if (['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
-          if (!text.endsWith('\n')) {
-            text += '\n';
-          }
-        }
+    clone.querySelectorAll('strong, b').forEach(el => {
+      el.outerHTML = `*${el.textContent}*`;
+    });
+    clone.querySelectorAll('em, i').forEach(el => {
+      el.outerHTML = `_${el.textContent}_`;
+    });
+    clone.querySelectorAll('code').forEach(el => {
+      if (!el.closest('pre')) {
+        el.outerHTML = `\`${el.textContent}\``;
       }
-    };
-
-    walk(clone);
-
-    // Clean up
-    text = text
-      .replace(/```\n```/g, '') // Remove empty code blocks
-      .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines
-      .trim();
-
-    return text;
-  }
-
-  function hashMessage(text) {
-    // Simple hash for deduplication
-    let hash = 0;
-    const str = text.substring(0, 500); // Use first 500 chars for hash
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return hash.toString();
-  }
-
-  function startObserving() {
-    if (observer) {
-      observer.disconnect();
-    }
-
-    // Find the chat container
-    const chatContainer = document.querySelector('[class*="chat"], [class*="conversation"], main, #root');
-
-    if (!chatContainer) {
-      console.log('[Persephone] Chat container not found, retrying...');
-      setTimeout(startObserving, 1000);
-      return;
-    }
-
-    observer = new MutationObserver(handleMutations);
-
-    observer.observe(chatContainer, {
-      childList: true,
-      subtree: true,
-      characterData: true
     });
 
-    console.log('[Persephone] Observer started');
+    return clone.textContent.trim();
   }
 
-  function handleMutations(mutations) {
-    if (!initialLoadComplete || !enabled) return;
+  function formatList(list, tag) {
+    const items = [];
+    list.querySelectorAll(':scope > li').forEach((li, i) => {
+      const prefix = tag === 'ol' ? `${i + 1}.` : '•';
+      items.push(`${prefix} ${cleanText(li)}`);
+    });
+    return items.join('\n');
+  }
 
-    // Check if there's a new or updated Grok message
-    const latestMessage = findLatestGrokMessage();
+  function formatTable(table) {
+    const rows = [];
+    const headers = [];
+    table.querySelectorAll('th').forEach(th => headers.push(th.textContent.trim()));
+    if (headers.length) rows.push(headers.join(' | '));
 
-    if (!latestMessage) return;
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      const cells = [];
+      tr.querySelectorAll('td').forEach(td => cells.push(td.textContent.trim()));
+      if (cells.length) rows.push(cells.join(' | '));
+    });
+    return rows.join('\n');
+  }
 
-    const currentText = extractMessageText(latestMessage);
-    const currentHash = hashMessage(currentText);
+  function formatCode(pre) {
+    const code = pre.querySelector('code');
+    return '```\n' + (code ? code.textContent : pre.textContent).trim() + '\n```';
+  }
 
-    // Skip if already processed or empty
-    if (processedMessages.has(currentHash) || !currentText.trim()) {
-      return;
+  function hash(text) {
+    let h = 0;
+    const str = text.substring(0, 300);
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h) + str.charCodeAt(i);
+      h = h & h;
     }
-
-    // Skip if still streaming
-    if (isMessageStreaming(latestMessage)) {
-      return;
-    }
-
-    // Track this as a pending response and wait for stability
-    if (pendingResponse !== currentHash) {
-      pendingResponse = currentHash;
-
-      // Clear existing timer
-      if (stabilityTimer) {
-        clearTimeout(stabilityTimer);
-      }
-
-      // Wait for the message to stabilize (stop changing)
-      stabilityTimer = setTimeout(() => {
-        // Re-check the message after delay
-        const finalMessage = findLatestGrokMessage();
-        if (!finalMessage) return;
-
-        const finalText = extractMessageText(finalMessage);
-        const finalHash = hashMessage(finalText);
-
-        // Only send if the message hasn't changed and isn't streaming
-        if (finalHash === pendingResponse && !isMessageStreaming(finalMessage) && !processedMessages.has(finalHash)) {
-          processedMessages.add(finalHash);
-          sendToTelegram(finalText);
-        }
-
-        pendingResponse = null;
-      }, STABILITY_DELAY);
-    }
+    return h.toString();
   }
 
   async function sendToTelegram(text) {
-    if (!enabled) {
-      console.log('[Persephone] Auto-send disabled, skipping');
-      return;
-    }
-
-    console.log('[Persephone] Sending message to Telegram...');
-
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'SEND_TO_TELEGRAM',
         text: text
       });
-
-      if (response.success) {
-        showToast('Sent to Telegram', 'success');
-        console.log('[Persephone] Message sent successfully');
+      if (response?.success) {
+        debug('✓ Sent');
+        return true;
       } else {
-        showToast(`Failed: ${response.error}`, 'error');
-        console.error('[Persephone] Failed to send:', response.error);
+        console.error('[Persephone] Failed:', response?.error);
+        return false;
       }
     } catch (error) {
-      showToast(`Error: ${error.message}`, 'error');
-      console.error('[Persephone] Error sending message:', error);
+      console.error('[Persephone] Error:', error);
+      return false;
     }
-  }
-
-  function showToast(message, type = 'info') {
-    // Remove existing toast
-    const existing = document.getElementById('persephone-toast');
-    if (existing) {
-      existing.remove();
-    }
-
-    const toast = document.createElement('div');
-    toast.id = 'persephone-toast';
-    toast.textContent = message;
-
-    const colors = {
-      success: { bg: 'rgba(34, 197, 94, 0.95)', border: '#22c55e' },
-      error: { bg: 'rgba(239, 68, 68, 0.95)', border: '#ef4444' },
-      info: { bg: 'rgba(168, 85, 247, 0.95)', border: '#a855f7' }
-    };
-
-    const color = colors[type] || colors.info;
-
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: ${color.bg};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      border: 1px solid ${color.border};
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      z-index: 999999;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      animation: persephone-slide-in 0.3s ease-out;
-    `;
-
-    // Add animation styles if not already present
-    if (!document.getElementById('persephone-styles')) {
-      const styles = document.createElement('style');
-      styles.id = 'persephone-styles';
-      styles.textContent = `
-        @keyframes persephone-slide-in {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-        @keyframes persephone-slide-out {
-          from {
-            transform: translateX(0);
-            opacity: 1;
-          }
-          to {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-        }
-      `;
-      document.head.appendChild(styles);
-    }
-
-    document.body.appendChild(toast);
-
-    // Remove after 3 seconds
-    setTimeout(() => {
-      toast.style.animation = 'persephone-slide-out 0.3s ease-in forwards';
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
   }
 
 })();
