@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Persephone</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Persephone</h1>
+      <p class="subtitle">Grok to Telegram</p>
+    </header>
+
+    <div class="status-bar" id="statusBar">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Not configured</span>
+    </div>
+
+    <div class="form-group">
+      <label for="botToken">Bot Token</label>
+      <input type="password" id="botToken" placeholder="123456789:ABC..." autocomplete="off">
+      <button class="toggle-visibility" id="toggleToken" title="Show/Hide">
+        <span id="tokenIcon">Show</span>
+      </button>
+    </div>
+
+    <div class="form-group">
+      <label for="chatId">Chat ID</label>
+      <input type="text" id="chatId" placeholder="-1001234567890 or @username" autocomplete="off">
+    </div>
+
+    <div class="toggle-group">
+      <label for="enableToggle">Auto-send to Telegram</label>
+      <label class="switch">
+        <input type="checkbox" id="enableToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="button-group">
+      <button id="saveBtn" class="btn primary">Save Settings</button>
+      <button id="testBtn" class="btn secondary">Test Connection</button>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <footer>
+      <p>Messages sent: <span id="messageCount">0</span></p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
