@@ -60,6 +60,34 @@
 
     const style = document.createElement('style');
     style.textContent = `
+      .persephone-inline-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        background: #a855f7;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-left: 8px;
+        vertical-align: middle;
+        opacity: 0.7;
+        transition: opacity 0.2s, transform 0.2s;
+      }
+      .persephone-inline-btn:hover {
+        opacity: 1;
+        transform: scale(1.1);
+      }
+      .persephone-inline-btn.sent {
+        background: #22c55e;
+        cursor: default;
+      }
+      .persephone-inline-btn svg {
+        width: 12px;
+        height: 12px;
+        fill: white;
+      }
       #persephone-panel {
         position: fixed;
         bottom: 20px;
@@ -376,6 +404,9 @@
     const tag = element.tagName.toLowerCase();
     if (['section', 'div', 'button', 'span'].includes(tag)) return;
 
+    // Skip if already has our button
+    if (element.querySelector('.persephone-inline-btn')) return;
+
     const text = extractText(element);
     if (!text || text.length < 3) return;
 
@@ -385,8 +416,44 @@
     seenHashes.add(h);
     console.log(`[Persephone] ✅ <${tag}>:`, text);
 
-    // Add to panel instead of auto-sending
+    // Add inline send button to the element
+    addInlineButton(element, text);
+
+    // Add to panel
     addChunk(tag, text);
+  }
+
+  function addInlineButton(element, text) {
+    const btn = document.createElement('button');
+    btn.className = 'persephone-inline-btn';
+    btn.title = 'Send to Telegram';
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (btn.classList.contains('sent')) return;
+
+      btn.style.opacity = '0.5';
+      const success = await sendToTelegram(text);
+
+      if (success) {
+        btn.classList.add('sent');
+        btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+        btn.title = 'Sent!';
+
+        // Also mark as sent in panel
+        const chunkIndex = chunks.findIndex(c => c.text === text);
+        if (chunkIndex !== -1) {
+          chunks[chunkIndex].sent = true;
+          updateChunksUI();
+        }
+      }
+      btn.style.opacity = '';
+    });
+
+    element.appendChild(btn);
   }
 
   function extractText(element) {
