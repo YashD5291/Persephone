@@ -1,11 +1,12 @@
 // Persephone - Content Script for grok.com
-// v3.1 - Inline send buttons only, no floating panel
+// v3.3 - Inline send buttons with edit/delete + latency optimizations
 
 (function() {
   'use strict';
 
   let seenTexts = new Set();
   let currentStreamingContainer = null;
+  let sentMessages = new Map(); // Track sent messages: element -> { messageId, text }
 
   const DEBUG = true;
 
@@ -60,7 +61,7 @@
     const clone = element.cloneNode(true);
     
     // Remove unwanted elements
-    clone.querySelectorAll('button, svg, img, .persephone-inline-btn, .animate-gaussian, .citation')
+    clone.querySelectorAll('button, svg, img, .persephone-inline-btn, .persephone-btn-group, .animate-gaussian, .citation')
       .forEach(el => el.remove());
 
     // Convert formatting
@@ -109,9 +110,106 @@
   // BUTTON INJECTION
   // ============================================
 
+  function createSendButton(element, text) {
+    const btn = document.createElement('button');
+    btn.className = 'persephone-inline-btn persephone-send-btn';
+    btn.title = 'Send to Telegram';
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+    
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      btn.style.opacity = '0.5';
+      btn.style.pointerEvents = 'none';
+      
+      const result = await sendToTelegram(text);
+      
+      if (result.success) {
+        // Store message info for edit/delete
+        sentMessages.set(element, { 
+          messageId: result.messageId, 
+          text: text,
+          isMultiPart: result.isMultiPart 
+        });
+        
+        // Replace send button with action buttons
+        replaceWithActionButtons(element, btn);
+      } else {
+        btn.style.opacity = '0.8';
+        btn.style.pointerEvents = 'auto';
+      }
+    });
+
+    return btn;
+  }
+
+  function replaceWithActionButtons(element, sendBtn) {
+    // Create button group
+    const btnGroup = document.createElement('span');
+    btnGroup.className = 'persephone-btn-group';
+    
+    // Sent indicator (checkmark)
+    const sentIndicator = document.createElement('span');
+    sentIndicator.className = 'persephone-sent-indicator';
+    sentIndicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+    sentIndicator.title = 'Sent to Telegram';
+    
+    // Edit button
+    const editBtn = document.createElement('button');
+    editBtn.className = 'persephone-inline-btn persephone-edit-btn';
+    editBtn.title = 'Edit message';
+    editBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+    
+    editBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openEditModal(element);
+    });
+    
+    // Delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'persephone-inline-btn persephone-delete-btn';
+    deleteBtn.title = 'Delete message';
+    deleteBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
+    
+    deleteBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const msgData = sentMessages.get(element);
+      if (!msgData) return;
+      
+      // Show confirmation
+      if (!confirm('Delete this message from Telegram?')) return;
+      
+      deleteBtn.style.opacity = '0.5';
+      deleteBtn.style.pointerEvents = 'none';
+      
+      const success = await deleteFromTelegram(msgData.messageId);
+      
+      if (success) {
+        sentMessages.delete(element);
+        // Replace action buttons with send button again
+        const newSendBtn = createSendButton(element, extractText(element));
+        btnGroup.replaceWith(newSendBtn);
+        showToast('✓ Message deleted');
+      } else {
+        deleteBtn.style.opacity = '0.8';
+        deleteBtn.style.pointerEvents = 'auto';
+      }
+    });
+    
+    btnGroup.appendChild(sentIndicator);
+    btnGroup.appendChild(editBtn);
+    btnGroup.appendChild(deleteBtn);
+    
+    sendBtn.replaceWith(btnGroup);
+  }
+
   function addButtonToElement(element) {
     // Skip if already has button
-    if (element.querySelector('.persephone-inline-btn')) return false;
+    if (element.querySelector('.persephone-inline-btn') || element.querySelector('.persephone-btn-group')) return false;
     
     // Skip if still streaming
     if (isElementStreaming(element)) return false;
@@ -120,32 +218,8 @@
     const text = extractText(element);
     if (!text || text.length < 5) return false;
 
-    // Create button
-    const btn = document.createElement('button');
-    btn.className = 'persephone-inline-btn';
-    btn.title = 'Send to Telegram';
-    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
-    
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      if (btn.classList.contains('sent')) return;
-      
-      btn.style.opacity = '0.5';
-      btn.style.pointerEvents = 'none';
-      
-      const success = await sendToTelegram(text);
-      
-      if (success) {
-        btn.classList.add('sent');
-        btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-        btn.title = 'Sent!';
-      } else {
-        btn.style.opacity = '0.8';
-        btn.style.pointerEvents = 'auto';
-      }
-    });
+    // Check if this was already sent (page refresh scenario - just add send button)
+    const btn = createSendButton(element, text);
 
     element.style.position = 'relative';
     element.appendChild(btn);
@@ -241,13 +315,137 @@
   }
 
   // ============================================
-  // TELEGRAM
+  // EDIT MODAL
   // ============================================
+
+  function openEditModal(element) {
+    const msgData = sentMessages.get(element);
+    if (!msgData) {
+      showToast('⚠️ Message data not found');
+      return;
+    }
+
+    // Check if multi-part message
+    if (msgData.isMultiPart) {
+      showToast('⚠️ Editing multi-part messages is not supported');
+      return;
+    }
+
+    // Remove existing modal if any
+    closeEditModal();
+
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'persephone-modal-overlay';
+    modal.innerHTML = `
+      <div class="persephone-modal">
+        <div class="persephone-modal-header">
+          <span>Edit Message</span>
+          <button class="persephone-modal-close">&times;</button>
+        </div>
+        <div class="persephone-modal-body">
+          <textarea class="persephone-edit-textarea">${escapeHtml(msgData.text)}</textarea>
+          <div class="persephone-modal-hint">Markdown formatting is supported: *bold*, _italic_, \`code\`</div>
+        </div>
+        <div class="persephone-modal-footer">
+          <button class="persephone-modal-btn persephone-modal-cancel">Cancel</button>
+          <button class="persephone-modal-btn persephone-modal-save">Save Changes</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const textarea = modal.querySelector('.persephone-edit-textarea');
+    const closeBtn = modal.querySelector('.persephone-modal-close');
+    const cancelBtn = modal.querySelector('.persephone-modal-cancel');
+    const saveBtn = modal.querySelector('.persephone-modal-save');
+
+    // Focus textarea and move cursor to end
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    // Close handlers
+    closeBtn.addEventListener('click', closeEditModal);
+    cancelBtn.addEventListener('click', closeEditModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeEditModal();
+    });
+
+    // Save handler
+    saveBtn.addEventListener('click', async () => {
+      const newText = textarea.value.trim();
+      
+      if (!newText) {
+        showToast('⚠️ Message cannot be empty');
+        return;
+      }
+
+      if (newText === msgData.text) {
+        closeEditModal();
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      const success = await editInTelegram(msgData.messageId, newText);
+
+      if (success) {
+        // Update stored text
+        msgData.text = newText;
+        sentMessages.set(element, msgData);
+        closeEditModal();
+        showToast('✓ Message updated');
+      } else {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+      }
+    });
+
+    // Keyboard shortcuts
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeEditModal();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        saveBtn.click();
+      }
+    });
+  }
+
+  function closeEditModal() {
+    const modal = document.querySelector('.persephone-modal-overlay');
+    if (modal) modal.remove();
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // ============================================
+  // TELEGRAM API
+  // ============================================
+
+  /**
+   * Trigger API preconnect in background script
+   */
+  function triggerPreconnect() {
+    if (!isContextValid()) return;
+    
+    try {
+      chrome.runtime.sendMessage({ type: 'PRECONNECT' });
+      debug('🔌 Preconnect triggered');
+    } catch (e) {
+      // Ignore errors
+    }
+  }
 
   async function sendToTelegram(text) {
     if (!isContextValid()) {
       showToast('⚠️ Extension disconnected. Please refresh the page.');
-      return false;
+      return { success: false };
     }
     
     try {
@@ -257,18 +455,77 @@
       });
       
       if (response?.success) {
-        debug('✓ Sent to Telegram');
-        return true;
+        debug('✔ Sent to Telegram, messageId:', response.messageId);
+        return { 
+          success: true, 
+          messageId: response.messageId,
+          isMultiPart: response.isMultiPart
+        };
       } else {
         debug('✗ Send failed:', response?.error);
         showToast(`Failed: ${response?.error || 'Unknown error'}`);
-        return false;
+        return { success: false };
       }
     } catch (error) {
       debug('✗ Error:', error.message);
       if (error.message?.includes('Extension context invalidated')) {
         showToast('⚠️ Extension disconnected. Please refresh the page.');
       }
+      return { success: false };
+    }
+  }
+
+  async function editInTelegram(messageId, newText) {
+    if (!isContextValid()) {
+      showToast('⚠️ Extension disconnected. Please refresh the page.');
+      return false;
+    }
+    
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'EDIT_MESSAGE',
+        messageId: messageId,
+        text: newText
+      });
+      
+      if (response?.success) {
+        debug('✔ Message edited');
+        return true;
+      } else {
+        debug('✗ Edit failed:', response?.error);
+        showToast(`Edit failed: ${response?.error || 'Unknown error'}`);
+        return false;
+      }
+    } catch (error) {
+      debug('✗ Edit error:', error.message);
+      showToast('⚠️ Failed to edit message');
+      return false;
+    }
+  }
+
+  async function deleteFromTelegram(messageId) {
+    if (!isContextValid()) {
+      showToast('⚠️ Extension disconnected. Please refresh the page.');
+      return false;
+    }
+    
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DELETE_MESSAGE',
+        messageId: messageId
+      });
+      
+      if (response?.success) {
+        debug('✔ Message deleted');
+        return true;
+      } else {
+        debug('✗ Delete failed:', response?.error);
+        showToast(`Delete failed: ${response?.error || 'Unknown error'}`);
+        return false;
+      }
+    } catch (error) {
+      debug('✗ Delete error:', error.message);
+      showToast('⚠️ Failed to delete message');
       return false;
     }
   }
@@ -279,10 +536,16 @@
     
     const toast = document.createElement('div');
     toast.className = 'persephone-toast';
+    
+    // Success or error styling
+    if (message.startsWith('✓')) {
+      toast.classList.add('persephone-toast-success');
+    }
+    
     toast.textContent = message;
     document.body.appendChild(toast);
     
-    setTimeout(() => toast.remove(), 5000);
+    setTimeout(() => toast.remove(), 3000);
   }
 
   // ============================================
@@ -292,6 +555,32 @@
   function injectStyles() {
     const style = document.createElement('style');
     style.textContent = `
+      /* Button Group */
+      .persephone-btn-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      
+      /* Sent Indicator */
+      .persephone-sent-indicator {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        border-radius: 50%;
+      }
+      .persephone-sent-indicator svg {
+        width: 10px;
+        height: 10px;
+        fill: white;
+      }
+      
+      /* Base Button Styles */
       .persephone-inline-btn {
         display: inline-flex;
         align-items: center;
@@ -313,17 +602,42 @@
         transform: scale(1.1);
         box-shadow: 0 4px 8px rgba(168, 85, 247, 0.4);
       }
-      .persephone-inline-btn.sent {
-        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-        cursor: default;
-        box-shadow: 0 2px 4px rgba(34, 197, 94, 0.3);
-      }
       .persephone-inline-btn svg {
         width: 12px;
         height: 12px;
         fill: white;
       }
       
+      /* In button group - smaller margins */
+      .persephone-btn-group .persephone-inline-btn {
+        margin-left: 0;
+        width: 20px;
+        height: 20px;
+      }
+      .persephone-btn-group .persephone-inline-btn svg {
+        width: 11px;
+        height: 11px;
+      }
+      
+      /* Edit Button */
+      .persephone-edit-btn {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+      }
+      .persephone-edit-btn:hover {
+        box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+      }
+      
+      /* Delete Button */
+      .persephone-delete-btn {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+      }
+      .persephone-delete-btn:hover {
+        box-shadow: 0 4px 8px rgba(239, 68, 68, 0.4);
+      }
+      
+      /* Toast */
       .persephone-toast {
         position: fixed;
         bottom: 20px;
@@ -338,10 +652,152 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         animation: persephoneSlideIn 0.3s ease;
       }
+      .persephone-toast-success {
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+      }
       
       @keyframes persephoneSlideIn {
         from { opacity: 0; transform: translateY(20px); }
         to { opacity: 1; transform: translateY(0); }
+      }
+      
+      /* Modal */
+      .persephone-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999999;
+        animation: persephoneFadeIn 0.2s ease;
+      }
+      
+      @keyframes persephoneFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      
+      .persephone-modal {
+        background: #1a1a2e;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        animation: persephoneSlideUp 0.3s ease;
+      }
+      
+      @keyframes persephoneSlideUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .persephone-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        font-family: system-ui, sans-serif;
+        font-weight: 600;
+        font-size: 16px;
+        color: #fff;
+      }
+      
+      .persephone-modal-close {
+        background: none;
+        border: none;
+        color: #888;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        transition: color 0.2s;
+      }
+      .persephone-modal-close:hover {
+        color: #fff;
+      }
+      
+      .persephone-modal-body {
+        padding: 20px;
+        flex: 1;
+        overflow: auto;
+      }
+      
+      .persephone-edit-textarea {
+        width: 100%;
+        min-height: 200px;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        color: #fff;
+        font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+      .persephone-edit-textarea:focus {
+        outline: none;
+        border-color: #a855f7;
+        box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+      }
+      
+      .persephone-modal-hint {
+        margin-top: 8px;
+        font-family: system-ui, sans-serif;
+        font-size: 12px;
+        color: #888;
+      }
+      
+      .persephone-modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 16px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      .persephone-modal-btn {
+        padding: 10px 20px;
+        border-radius: 6px;
+        border: none;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .persephone-modal-cancel {
+        background: rgba(255, 255, 255, 0.1);
+        color: #ccc;
+      }
+      .persephone-modal-cancel:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+      }
+      
+      .persephone-modal-save {
+        background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+        color: white;
+      }
+      .persephone-modal-save:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+      }
+      .persephone-modal-save:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
       }
     `;
     document.head.appendChild(style);
@@ -352,9 +808,12 @@
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.1 (inline buttons only)');
+    debug('🚀 Persephone v3.3 (with latency optimizations)');
 
     injectStyles();
+    
+    // Trigger API preconnect immediately
+    triggerPreconnect();
 
     setTimeout(() => {
       const count = scanAllResponses();
