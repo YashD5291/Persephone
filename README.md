@@ -1,116 +1,147 @@
-# Persephone
+# 🌸 Persephone - Grok to Telegram Bridge
 
-A Chrome extension that monitors [grok.com](https://grok.com) and automatically sends Grok's responses to Telegram.
+A Chrome extension that captures Grok AI responses in real-time and sends them to Telegram.
 
 ## Features
 
-- Detects when Grok finishes streaming a response
-- Automatically sends to Telegram with toast confirmation
-- Handles long messages (splits at 4096 char limit)
-- Deduplication prevents sending the same message twice
-- Ignores pre-existing messages on page load
-- Enable/disable toggle in the popup
-- Message counter tracks how many have been sent
-
-## Installation
-
-1. **Open Chrome Extensions page:**
-   - Navigate to `chrome://extensions/`
-   - Or go to Menu → More Tools → Extensions
-
-2. **Enable Developer Mode:**
-   - Toggle the "Developer mode" switch in the top-right corner
-
-3. **Load the extension:**
-   - Click "Load unpacked"
-   - Select this `Persephone` folder
-
-4. **Configure Telegram:**
-   - Click the Persephone icon in your toolbar
-   - Enter your **Bot Token** (from @BotFather)
-   - Enter your **Chat ID** (your user ID or group chat ID)
-   - Enable "Auto-send to Telegram"
-   - Click "Save Settings"
-   - Use "Test Connection" to verify it works
-
-## Getting Telegram Credentials
-
-### Bot Token
-
-1. Open Telegram and message [@BotFather](https://t.me/BotFather)
-2. Send `/newbot`
-3. Follow the prompts to name your bot
-4. Copy the token it gives you (looks like `123456789:ABC-DEF...`)
-
-### Chat ID
-
-1. **Important:** Message your bot first (send any message to it)
-2. Visit: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-3. Look for `"chat":{"id":123456789}` in the response
-4. That number is your Chat ID
-
-**For group chats:**
-- Add your bot to the group
-- The Chat ID will be negative (e.g., `-1001234567890`)
-
-## Project Structure
-
-```
-Persephone/
-├── manifest.json      # Extension manifest (V3)
-├── popup.html         # Settings popup UI
-├── popup.css          # Popup styling
-├── popup.js           # Popup logic
-├── content.js         # DOM monitor for grok.com
-├── background.js      # Telegram API handler
-└── icons/
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
-```
+- **Real-time streaming detection** using Grok's `animate-gaussian` class
+- **Hybrid approach**: Polling for new responses + MutationObserver for chunks
+- **Telegram Markdown support**: Bold, italic, code blocks, lists, tables
+- **Floating panel UI**: Select and send individual chunks or all at once
+- **Inline send buttons**: Quick send buttons appear next to each content block
 
 ## How It Works
 
-1. **Content Script** (`content.js`) runs on grok.com and monitors the DOM for new assistant messages
-2. When a message finishes streaming (detected via stability check), it extracts the text
-3. The message is sent to the **Background Service Worker** (`background.js`)
-4. The service worker calls the Telegram Bot API to send the message
-5. A toast notification confirms success/failure on the page
+### Detection Strategy
 
-## Configuration Options
+Grok uses a unique streaming approach:
+1. While typing, words are wrapped in `<span class="animate-gaussian">` elements
+2. When a block (paragraph, list, etc.) is complete, these spans are removed
+3. Persephone detects this transition to know when content is ready to capture
 
-| Setting | Description |
-|---------|-------------|
-| Bot Token | Your Telegram bot's API token from @BotFather |
-| Chat ID | Target chat ID (user, group, or channel) |
-| Auto-send | Toggle to enable/disable automatic sending |
+```
+STREAMING:   <p>Hello <span class="animate-gaussian">world</span></p>
+COMPLETE:    <p>Hello world</p>  ← Ready to capture!
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 1: POLLING (every 1000ms)                                │
+│  - Checks for new response containers                           │
+│  - Lightweight: just compares response IDs                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ New response detected
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 2: MUTATION OBSERVER (reactive)                          │
+│  - Watches only the new response container                      │
+│  - Debounces mutations (150ms)                                  │
+│  - Checks for .animate-gaussian to detect streaming             │
+│  - Processes complete elements immediately                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ No .animate-gaussian found
+┌─────────────────────────────────────────────────────────────────┐
+│  PHASE 3: COMPLETION                                            │
+│  - Final processing pass                                        │
+│  - Disconnect observer                                          │
+│  - Return to polling mode                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Installation
+
+1. Download or clone this repository
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable "Developer mode" (top right)
+4. Click "Load unpacked" and select the extension folder
+5. Click the extension icon and configure your Telegram bot
+
+## Setup Telegram Bot
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/newbot` and follow the instructions
+3. Copy the bot token (looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+4. Get your Chat ID from [@userinfobot](https://t.me/userinfobot)
+5. Enter both in the extension popup
+
+## Usage
+
+1. Go to [grok.com](https://grok.com)
+2. Start a conversation with Grok
+3. The Persephone panel appears in the bottom-right corner
+4. As Grok responds, chunks are captured in real-time
+5. Click "Send" on individual chunks or "Send All" for everything
+
+## Keyboard Shortcuts
+
+(Coming soon)
+
+## Files
+
+```
+persephone-extension/
+├── manifest.json      # Extension configuration
+├── background.js      # Service worker for Telegram API
+├── content.js         # Main content script for grok.com
+├── popup.html         # Settings popup UI
+├── popup.js           # Settings popup logic
+├── icons/
+│   ├── icon16.png
+│   ├── icon48.png
+│   └── icon128.png
+└── README.md
+```
+
+## Telegram Formatting
+
+Content is converted to Telegram Markdown:
+
+| HTML | Telegram |
+|------|----------|
+| `<strong>` | `*bold*` |
+| `<em>` | `_italic_` |
+| `<u>` | `__underline__` |
+| `<del>` | `~strikethrough~` |
+| `<code>` | `` `code` `` |
+| `<pre>` | ` ```code block``` ` |
+| `<h1>`-`<h6>` | `*Header*` |
+| `<ul>` | `• item` |
+| `<ol>` | `1. item` |
 
 ## Troubleshooting
 
-**"Not configured" status:**
-- Make sure both Bot Token and Chat ID are filled in
-- Click "Save Settings" after entering credentials
+### Buttons not appearing
+- Make sure you're on grok.com (not x.com or other sites)
+- Refresh the page
+- Check if the extension is enabled
 
-**Test connection fails:**
-- Verify your bot token is correct
-- Make sure you've messaged the bot at least once
-- Check that the Chat ID is correct
+### Messages not sending
+- Verify bot token and chat ID in settings
+- Test connection using the "Test Connection" button
+- Make sure the bot has permission to message you (send it a message first)
 
-**Messages not being sent:**
-- Ensure "Auto-send to Telegram" is enabled
-- Check the browser console for errors (F12 → Console)
-- The extension waits 1.5 seconds after streaming stops to ensure the message is complete
+### Chunks not being captured
+- This version requires the `animate-gaussian` class which Grok uses
+- If Grok changes their DOM structure, the extension may need updating
 
-**Duplicate messages:**
-- The extension tracks sent messages by hash
-- If you reload the page, existing messages won't be re-sent
+## Version History
 
-## Privacy
+### v2.0.0
+- Complete rewrite with `animate-gaussian` detection
+- Hybrid polling + MutationObserver approach
+- Improved UI with animations
+- Better Telegram Markdown formatting
 
-- Your Bot Token and Chat ID are stored locally in Chrome's sync storage
-- Messages are sent directly to Telegram's API (no intermediary servers)
-- The extension only runs on grok.com domains
+### v1.0.0
+- Initial release with polling-based detection
 
 ## License
 
-MIT
+MIT License - feel free to modify and share!
+
+## Credits
+
+Built with ❤️ for the Grok community.

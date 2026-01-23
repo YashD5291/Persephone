@@ -1,5 +1,5 @@
 // Persephone - Background Service Worker
-// Handles Telegram API communication
+// Handles Telegram API communication with MarkdownV2 support
 
 const TELEGRAM_MAX_LENGTH = 4096;
 
@@ -9,7 +9,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendTestMessage(request.botToken, request.chatId)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // Keep channel open for async response
+    return true;
   }
 
   if (request.type === 'SEND_TO_TELEGRAM') {
@@ -18,88 +18,135 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.type === 'GET_STATS') {
+    chrome.storage.sync.get(['messageCount'], (result) => {
+      sendResponse({ messageCount: result.messageCount || 0 });
+    });
+    return true;
+  }
 });
 
 async function sendTestMessage(botToken, chatId) {
-  const testMessage = `Persephone connected successfully!\n\nTimestamp: ${new Date().toISOString()}`;
+  const testMessage = `✅ *Persephone connected\\!*
+
+🕐 ${escapeMarkdownV2(new Date().toLocaleString())}
+
+_Ready to receive messages\\._`;
+  
   return sendTelegramMessage(botToken, chatId, testMessage);
 }
 
 async function handleSendToTelegram(text) {
   const settings = await chrome.storage.sync.get(['botToken', 'chatId', 'enabled', 'messageCount']);
 
-  if (!settings.enabled) {
-    return { success: false, error: 'Auto-send is disabled' };
+  if (!settings.botToken || !settings.chatId) {
+    return { success: false, error: 'Bot token or chat ID not configured. Please set up in extension popup.' };
   }
 
-  if (!settings.botToken || !settings.chatId) {
-    return { success: false, error: 'Bot token or chat ID not configured' };
+  // Default enabled to true if not set
+  if (settings.enabled === false) {
+    return { success: false, error: 'Sending is disabled in settings' };
   }
 
   const result = await sendTelegramMessage(settings.botToken, settings.chatId, text);
 
   if (result.success) {
-    // Increment message count
     const newCount = (settings.messageCount || 0) + 1;
     await chrome.storage.sync.set({ messageCount: newCount });
+    console.log(`[Persephone] Message sent successfully. Total: ${newCount}`);
   }
 
   return result;
 }
 
+/**
+ * Escape special characters for Telegram MarkdownV2
+ * Characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+ */
+function escapeMarkdownV2(text) {
+  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
+
+/**
+ * Check if text contains Markdown formatting
+ */
+function hasMarkdownFormatting(text) {
+  // Check for common Markdown patterns
+  return /[*_`~]/.test(text) || /\[.*\]\(.*\)/.test(text) || /^>/.test(text);
+}
+
 async function sendTelegramMessage(botToken, chatId, text) {
-  // Split message if too long
   const messages = splitMessage(text, TELEGRAM_MAX_LENGTH);
 
   for (let i = 0; i < messages.length; i++) {
     const chunk = messages[i];
     const prefix = messages.length > 1 ? `[${i + 1}/${messages.length}] ` : '';
+    const fullText = prefix + chunk;
 
     try {
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: prefix + chunk,
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true
-        }),
-      });
+      // Determine if we should use Markdown
+      const useMarkdown = hasMarkdownFormatting(chunk);
 
-      const data = await response.json();
+      // Try sending with appropriate parse mode
+      let response;
+      let data;
 
-      if (!data.ok) {
-        // Retry without Markdown if parsing fails
-        if (data.description && data.description.includes('parse')) {
-          const retryResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      if (useMarkdown) {
+        // Try Markdown first (legacy, more forgiving)
+        response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: fullText,
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          }),
+        });
+        data = await response.json();
+
+        // If Markdown fails, try without formatting
+        if (!data.ok && data.description?.includes('parse')) {
+          console.warn('[Persephone] Markdown failed, retrying without formatting:', data.description);
+          
+          response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: chatId,
-              text: prefix + chunk,
+              text: fullText.replace(/[*_`~\[\]]/g, ''), // Strip markdown chars
               disable_web_page_preview: true
             }),
           });
-
-          const retryData = await retryResponse.json();
-          if (!retryData.ok) {
-            return { success: false, error: retryData.description };
-          }
-        } else {
-          return { success: false, error: data.description };
+          data = await response.json();
         }
+      } else {
+        // No markdown, send as plain text
+        response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: fullText,
+            disable_web_page_preview: true
+          }),
+        });
+        data = await response.json();
       }
 
-      // Small delay between chunks to avoid rate limiting
+      if (!data.ok) {
+        console.error('[Persephone] Telegram API error:', data);
+        return { success: false, error: data.description || 'Unknown error' };
+      }
+
+      // Rate limiting: small delay between chunks
       if (i < messages.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
+
     } catch (error) {
+      console.error('[Persephone] Network error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -121,30 +168,24 @@ function splitMessage(text, maxLength) {
       break;
     }
 
-    // Try to split at a natural break point
     let splitIndex = maxLength;
 
-    // Look for paragraph break
-    const paragraphBreak = remaining.lastIndexOf('\n\n', maxLength);
-    if (paragraphBreak > maxLength * 0.5) {
-      splitIndex = paragraphBreak + 2;
-    } else {
-      // Look for line break
-      const lineBreak = remaining.lastIndexOf('\n', maxLength);
-      if (lineBreak > maxLength * 0.5) {
-        splitIndex = lineBreak + 1;
-      } else {
-        // Look for sentence end
-        const sentenceEnd = remaining.lastIndexOf('. ', maxLength);
-        if (sentenceEnd > maxLength * 0.5) {
-          splitIndex = sentenceEnd + 2;
-        } else {
-          // Look for word boundary
-          const wordBoundary = remaining.lastIndexOf(' ', maxLength);
-          if (wordBoundary > maxLength * 0.5) {
-            splitIndex = wordBoundary + 1;
-          }
-        }
+    // Try to split at natural break points (in order of preference)
+    const breakPoints = [
+      { pattern: '\n```', offset: 4 },      // End of code block
+      { pattern: '```\n', offset: 0 },      // Start of code block
+      { pattern: '\n\n', offset: 2 },       // Paragraph break
+      { pattern: '\n', offset: 1 },         // Line break
+      { pattern: '. ', offset: 2 },         // Sentence end
+      { pattern: ', ', offset: 2 },         // Clause break
+      { pattern: ' ', offset: 1 },          // Word boundary
+    ];
+
+    for (const bp of breakPoints) {
+      const idx = remaining.lastIndexOf(bp.pattern, maxLength);
+      if (idx > maxLength * 0.4) {
+        splitIndex = idx + bp.offset;
+        break;
       }
     }
 
@@ -155,7 +196,24 @@ function splitMessage(text, maxLength) {
   return chunks;
 }
 
-// Install handler
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Persephone extension installed');
+// Extension lifecycle
+chrome.runtime.onInstalled.addListener((details) => {
+  console.log('[Persephone] Extension installed/updated:', details.reason);
+  
+  // Set default settings
+  chrome.storage.sync.get(['enabled', 'messageCount', 'botToken', 'chatId'], (result) => {
+    const defaults = {};
+    if (result.enabled === undefined) defaults.enabled = true;
+    if (result.messageCount === undefined) defaults.messageCount = 0;
+    
+    if (Object.keys(defaults).length > 0) {
+      chrome.storage.sync.set(defaults);
+      console.log('[Persephone] Default settings applied:', defaults);
+    }
+  });
+});
+
+// Handle extension icon click (open popup or options)
+chrome.action.onClicked.addListener((tab) => {
+  chrome.runtime.openOptionsPage();
 });
