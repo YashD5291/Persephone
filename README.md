@@ -1,14 +1,71 @@
-# 🌸 Persephone - Grok to Telegram Bridge
+# Persephone
 
-A Chrome extension that captures Grok AI responses in real-time and sends them to Telegram.
+A Chrome extension that monitors [grok.com](https://grok.com) and lets you send Grok's responses to Telegram with inline controls.
 
 ## Features
 
-- **Real-time streaming detection** using Grok's `animate-gaussian` class
-- **Hybrid approach**: Polling for new responses + MutationObserver for chunks
-- **Telegram Markdown support**: Bold, italic, code blocks, lists, tables
-- **Floating panel UI**: Select and send individual chunks or all at once
-- **Inline send buttons**: Quick send buttons appear next to each content block
+### Inline Send Buttons
+- **Send button** appears next to each paragraph, list, code block, and heading as Grok responds
+- Click to send individual chunks to Telegram instantly
+- Buttons appear in real-time as content streams
+
+### Edit & Delete
+- After sending, the send button transforms into **edit** and **delete** buttons
+- **Edit**: Opens a modal to modify the message in Telegram
+- **Delete**: Removes the message from Telegram (with confirmation)
+- Green checkmark indicates sent status
+
+### Smart Content Detection
+- Automatically detects paragraphs (`<p>`), headings (`<h1>`-`<h6>`), lists (`<ul>`, `<ol>`), code blocks (`<pre>`), blockquotes, and tables
+- Preserves Markdown formatting: `*bold*`, `_italic_`, `` `code` ``
+- Handles code blocks with language detection
+- Splits long messages automatically (4096 char Telegram limit)
+
+### Performance Optimizations
+- **API Preconnect**: Establishes connection to Telegram API proactively
+- **Settings Caching**: Credentials cached in memory for instant access
+- **Connection Keep-Alive**: Maintains warm connection to reduce latency
+- **Streaming Detection**: Waits for content to finish before adding buttons (detects `animate-gaussian` class)
+
+## Installation
+
+1. **Open Chrome Extensions page:**
+   - Navigate to `chrome://extensions/`
+   - Or go to Menu → More Tools → Extensions
+
+2. **Enable Developer Mode:**
+   - Toggle the "Developer mode" switch in the top-right corner
+
+3. **Load the extension:**
+   - Click "Load unpacked"
+   - Select the `Persephone` folder
+
+4. **Configure Telegram:**
+   - Click the Persephone icon in your toolbar
+   - Enter your **Bot Token** (from @BotFather)
+   - Enter your **Chat ID** (your user ID or group chat ID)
+   - Click "Save Settings"
+   - Use "Test Connection" to verify it works
+
+## Getting Telegram Credentials
+
+### Bot Token
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot`
+3. Follow the prompts to name your bot
+4. Copy the token it gives you (looks like `123456789:ABC-DEF...`)
+
+### Chat ID
+
+1. **Important:** Message your bot first (send any message to it)
+2. Visit: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+3. Look for `"chat":{"id":123456789}` in the response
+4. That number is your Chat ID
+
+**For group chats:**
+- Add your bot to the group
+- The Chat ID will be negative (e.g., `-1001234567890`)
 
 ## How It Works
 
@@ -30,19 +87,18 @@ COMPLETE:    <p>Hello world</p>  ← Ready to capture!
 ┌─────────────────────────────────────────────────────────────────┐
 │  PHASE 1: POLLING (every 1000ms)                                │
 │  - Checks for new response containers                           │
-│  - Lightweight: just compares response IDs                      │
+│  - Scans all responses and adds buttons to complete elements    │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼ New response detected
+                              ▼ New streaming response detected
 ┌─────────────────────────────────────────────────────────────────┐
 │  PHASE 2: MUTATION OBSERVER (reactive)                          │
-│  - Watches only the new response container                      │
-│  - Debounces mutations (150ms)                                  │
-│  - Checks for .animate-gaussian to detect streaming             │
-│  - Processes complete elements immediately                      │
+│  - Watches only the streaming response container                │
+│  - Processes elements as they complete (no animate-gaussian)    │
+│  - Adds inline send buttons immediately                         │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼ No .animate-gaussian found
+                              ▼ Streaming complete
 ┌─────────────────────────────────────────────────────────────────┐
 │  PHASE 3: COMPLETION                                            │
 │  - Final processing pass                                        │
@@ -51,49 +107,30 @@ COMPLETE:    <p>Hello world</p>  ← Ready to capture!
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Installation
-
-1. Download or clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable "Developer mode" (top right)
-4. Click "Load unpacked" and select the extension folder
-5. Click the extension icon and configure your Telegram bot
-
-## Setup Telegram Bot
-
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow the instructions
-3. Copy the bot token (looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
-4. Get your Chat ID from [@userinfobot](https://t.me/userinfobot)
-5. Enter both in the extension popup
-
-## Usage
-
-1. Go to [grok.com](https://grok.com)
-2. Start a conversation with Grok
-3. The Persephone panel appears in the bottom-right corner
-4. As Grok responds, chunks are captured in real-time
-5. Click "Send" on individual chunks or "Send All" for everything
-
-## Keyboard Shortcuts
-
-(Coming soon)
-
-## Files
+## Project Structure
 
 ```
-persephone-extension/
-├── manifest.json      # Extension configuration
-├── background.js      # Service worker for Telegram API
-├── content.js         # Main content script for grok.com
+Persephone/
+├── manifest.json      # Extension manifest (V3)
 ├── popup.html         # Settings popup UI
-├── popup.js           # Settings popup logic
-├── icons/
-│   ├── icon16.png
-│   ├── icon48.png
-│   └── icon128.png
-└── README.md
+├── popup.css          # Popup styling
+├── popup.js           # Popup logic
+├── content.js         # DOM monitor & inline buttons
+├── background.js      # Telegram API handler
+├── .gitignore         # Git ignore file
+└── icons/
+    ├── icon16.png
+    ├── icon48.png
+    └── icon128.png
 ```
+
+## Button States
+
+| State | Appearance | Actions |
+|-------|------------|---------|
+| Ready | Purple send icon | Click to send |
+| Sent | Green checkmark + blue edit + red delete | Edit or delete message |
+| Streaming | No button (waiting) | Content still loading |
 
 ## Telegram Formatting
 
@@ -101,47 +138,57 @@ Content is converted to Telegram Markdown:
 
 | HTML | Telegram |
 |------|----------|
-| `<strong>` | `*bold*` |
-| `<em>` | `_italic_` |
-| `<u>` | `__underline__` |
-| `<del>` | `~strikethrough~` |
+| `<strong>`, `<b>` | `*bold*` |
+| `<em>`, `<i>` | `_italic_` |
 | `<code>` | `` `code` `` |
 | `<pre>` | ` ```code block``` ` |
 | `<h1>`-`<h6>` | `*Header*` |
 | `<ul>` | `• item` |
 | `<ol>` | `1. item` |
+| `<blockquote>` | `> quote` |
+
+## Keyboard Shortcuts (Edit Modal)
+
+- `Ctrl/Cmd + Enter` - Save changes
+- `Escape` - Cancel and close
 
 ## Troubleshooting
 
-### Buttons not appearing
-- Make sure you're on grok.com (not x.com or other sites)
-- Refresh the page
-- Check if the extension is enabled
+**"Extension disconnected" error:**
+- The page was open too long. Refresh the page.
 
-### Messages not sending
-- Verify bot token and chat ID in settings
-- Test connection using the "Test Connection" button
-- Make sure the bot has permission to message you (send it a message first)
+**Buttons not appearing:**
+- Wait for Grok to finish streaming (buttons appear after content stabilizes)
+- Make sure you're on grok.com
+- Check the browser console for errors (F12 → Console)
 
-### Chunks not being captured
-- This version requires the `animate-gaussian` class which Grok uses
-- If Grok changes their DOM structure, the extension may need updating
+**Edit not working:**
+- Multi-part messages (split due to length) cannot be edited
+- Telegram only allows editing messages for 48 hours
+
+**Delete not working:**
+- Telegram only allows deleting messages for 48 hours
+- Bot must have delete permissions in group chats
+
+**Test connection fails:**
+- Verify your bot token is correct
+- Make sure you've messaged the bot at least once
+- Check that the Chat ID is correct
+
+## Privacy
+
+- Your Bot Token and Chat ID are stored locally in Chrome's sync storage
+- Messages are sent directly to Telegram's API (no intermediary servers)
+- The extension only runs on grok.com domains
+- No data is collected or transmitted elsewhere
 
 ## Version History
 
-### v2.0.0
-- Complete rewrite with `animate-gaussian` detection
-- Hybrid polling + MutationObserver approach
-- Improved UI with animations
-- Better Telegram Markdown formatting
-
-### v1.0.0
-- Initial release with polling-based detection
+- **v3.3** - Inline send/edit/delete buttons, streaming detection, latency optimizations
+- **v3.0** - Floating panel with manual chunk selection
+- **v2.0** - Real-time streaming detection with `animate-gaussian`
+- **v1.0** - Initial release with polling-based detection
 
 ## License
 
-MIT License - feel free to modify and share!
-
-## Credits
-
-Built with ❤️ for the Grok community.
+MIT
