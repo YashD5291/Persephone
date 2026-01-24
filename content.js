@@ -46,15 +46,24 @@
 
   function extractText(element) {
     const tag = element.tagName.toLowerCase();
-    
+
     if (tag === 'p') return cleanText(element);
     if (tag.match(/^h[1-6]$/)) return `*${cleanText(element)}*`;
+    if (tag === 'li') return formatListItem(element);
     if (tag === 'ul' || tag === 'ol') return formatList(element, tag);
     if (tag === 'pre') return formatCode(element);
     if (tag === 'blockquote') return `> ${cleanText(element)}`;
     if (tag === 'table') return formatTable(element);
-    
+
     return cleanText(element);
+  }
+
+  function formatListItem(li) {
+    const parent = li.parentElement;
+    const tag = parent?.tagName.toLowerCase();
+    const index = Array.from(parent?.children || []).indexOf(li);
+    const prefix = tag === 'ol' ? `${index + 1}.` : '•';
+    return `${prefix} ${cleanText(li)}`;
   }
 
   function cleanText(element) {
@@ -148,46 +157,78 @@
     // Create button group
     const btnGroup = document.createElement('span');
     btnGroup.className = 'persephone-btn-group';
-    
+
     // Sent indicator (checkmark)
     const sentIndicator = document.createElement('span');
     sentIndicator.className = 'persephone-sent-indicator';
     sentIndicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
     sentIndicator.title = 'Sent to Telegram';
-    
+
+    // Resend button
+    const resendBtn = document.createElement('button');
+    resendBtn.className = 'persephone-inline-btn persephone-resend-btn';
+    resendBtn.title = 'Resend message';
+    resendBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`;
+
+    resendBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const msgData = sentMessages.get(element);
+      if (!msgData) return;
+
+      resendBtn.style.opacity = '0.5';
+      resendBtn.style.pointerEvents = 'none';
+
+      const result = await sendToTelegram(msgData.text);
+
+      if (result.success) {
+        // Update with new message ID
+        sentMessages.set(element, {
+          messageId: result.messageId,
+          text: msgData.text,
+          isMultiPart: result.isMultiPart
+        });
+        showToast('✓ Message resent');
+      }
+
+      resendBtn.style.opacity = '0.8';
+      resendBtn.style.pointerEvents = 'auto';
+    });
+
     // Edit button
     const editBtn = document.createElement('button');
     editBtn.className = 'persephone-inline-btn persephone-edit-btn';
     editBtn.title = 'Edit message';
     editBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
-    
+
     editBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       openEditModal(element);
     });
-    
+
     // Delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'persephone-inline-btn persephone-delete-btn';
     deleteBtn.title = 'Delete message';
     deleteBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
-    
+
     deleteBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       const msgData = sentMessages.get(element);
       if (!msgData) return;
-      
+
       // Show confirmation
       if (!confirm('Delete this message from Telegram?')) return;
-      
+
       deleteBtn.style.opacity = '0.5';
       deleteBtn.style.pointerEvents = 'none';
-      
+
       const success = await deleteFromTelegram(msgData.messageId);
-      
+
       if (success) {
         sentMessages.delete(element);
         // Replace action buttons with send button again
@@ -199,26 +240,30 @@
         deleteBtn.style.pointerEvents = 'auto';
       }
     });
-    
+
     btnGroup.appendChild(sentIndicator);
+    btnGroup.appendChild(resendBtn);
     btnGroup.appendChild(editBtn);
     btnGroup.appendChild(deleteBtn);
-    
+
     sendBtn.replaceWith(btnGroup);
   }
 
   function addButtonToElement(element) {
-    // Skip if already has button
-    if (element.querySelector('.persephone-inline-btn') || element.querySelector('.persephone-btn-group')) return false;
-    
+    // Skip if this element already has its own button (direct child)
+    const hasOwnButton = Array.from(element.children).some(
+      child => child.classList.contains('persephone-inline-btn') ||
+               child.classList.contains('persephone-btn-group')
+    );
+    if (hasOwnButton) return false;
+
     // Skip if still streaming
     if (isElementStreaming(element)) return false;
-    
+
     // Extract text
     const text = extractText(element);
     if (!text || text.length < 5) return false;
 
-    // Check if this was already sent (page refresh scenario - just add send button)
     const btn = createSendButton(element, text);
 
     element.style.position = 'relative';
@@ -239,14 +284,15 @@
    */
   function processContainer(container) {
     if (!container) return 0;
-    
-    const elements = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, pre, blockquote, table');
+
+    // Add buttons to lists (full) and individual list items
+    const elements = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, li, pre, blockquote, table');
     let count = 0;
-    
+
     elements.forEach(el => {
       if (addButtonToElement(el)) count++;
     });
-    
+
     return count;
   }
 
@@ -617,6 +663,14 @@
       .persephone-btn-group .persephone-inline-btn svg {
         width: 11px;
         height: 11px;
+      }
+
+      /* Resend Button */
+      .persephone-resend-btn {
+        background: #fff;
+      }
+      .persephone-resend-btn svg {
+        fill: #1a1a1a;
       }
 
       /* Edit Button */
