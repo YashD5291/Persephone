@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const botTokenInput = document.getElementById('botToken');
   const chatIdInput = document.getElementById('chatId');
-  const enableToggle = document.getElementById('enableToggle');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
   const statusDot = document.getElementById('statusDot');
@@ -15,13 +14,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settings = await chrome.storage.sync.get([
     'botToken',
     'chatId',
-    'enabled',
     'messageCount'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
   if (settings.chatId) chatIdInput.value = settings.chatId;
-  enableToggle.checked = settings.enabled || false;
   messageCount.textContent = settings.messageCount || 0;
 
   updateStatus(settings.botToken && settings.chatId);
@@ -41,23 +38,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   saveBtn.addEventListener('click', async () => {
     const botToken = botTokenInput.value.trim();
     const chatId = chatIdInput.value.trim();
-    const enabled = enableToggle.checked;
 
     if (!botToken || !chatId) {
       showMessage('Please fill in both Bot Token and Chat ID', 'error');
       return;
     }
 
-    await chrome.storage.sync.set({ botToken, chatId, enabled });
+    await chrome.storage.sync.set({ botToken, chatId });
     updateStatus(true);
     showMessage('Settings saved successfully!', 'success');
-
-    // Notify content scripts about the change
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED', enabled });
-      });
-    });
   });
 
   // Test connection
@@ -93,23 +82,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     testBtn.textContent = 'Test Connection';
   });
 
-  // Enable toggle change
-  enableToggle.addEventListener('change', async () => {
-    const enabled = enableToggle.checked;
-    await chrome.storage.sync.set({ enabled });
-
-    // Notify content scripts
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED', enabled });
-      });
-    });
-  });
-
   function updateStatus(configured) {
     if (configured) {
       statusDot.classList.add('connected');
-      statusText.textContent = enableToggle.checked ? 'Active' : 'Configured (disabled)';
+      statusText.textContent = 'Configured';
     } else {
       statusDot.classList.remove('connected');
       statusText.textContent = 'Not configured';

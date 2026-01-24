@@ -11,7 +11,6 @@ const TELEGRAM_MAX_LENGTH = 4096;
 let settingsCache = {
   botToken: null,
   chatId: null,
-  enabled: true,
   messageCount: 0,
   lastLoaded: 0
 };
@@ -20,16 +19,15 @@ let settingsCache = {
  * Load settings into memory cache
  */
 async function loadSettingsCache() {
-  const settings = await chrome.storage.sync.get(['botToken', 'chatId', 'enabled', 'messageCount']);
-  
+  const settings = await chrome.storage.sync.get(['botToken', 'chatId', 'messageCount']);
+
   settingsCache = {
     botToken: settings.botToken || null,
     chatId: settings.chatId || null,
-    enabled: settings.enabled !== false, // Default true
     messageCount: settings.messageCount || 0,
     lastLoaded: Date.now()
   };
-  
+
   console.log('[Persephone] Settings cached in memory');
   return settingsCache;
 }
@@ -172,10 +170,6 @@ async function handleSendToTelegram(text) {
     if (!settingsCache.botToken || !settingsCache.chatId) {
       return { success: false, error: 'Bot token or chat ID not configured. Please set up in extension popup.' };
     }
-  }
-
-  if (settingsCache.enabled === false) {
-    return { success: false, error: 'Sending is disabled in settings' };
   }
 
   const result = await sendTelegramMessage(settingsCache.botToken, settingsCache.chatId, text);
@@ -470,9 +464,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[Persephone] Extension installed/updated:', details.reason);
   
   // Set default settings
-  const result = await chrome.storage.sync.get(['enabled', 'messageCount', 'botToken', 'chatId']);
+  const result = await chrome.storage.sync.get(['messageCount', 'botToken', 'chatId']);
   const defaults = {};
-  if (result.enabled === undefined) defaults.enabled = true;
   if (result.messageCount === undefined) defaults.messageCount = 0;
   
   if (Object.keys(defaults).length > 0) {
