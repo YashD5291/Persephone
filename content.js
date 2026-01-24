@@ -6,7 +6,11 @@
 
   let seenTexts = new Set();
   let currentStreamingContainer = null;
+  let lastContainerCount = 0;
+  let autoSentContainers = new WeakSet(); // Track containers that had auto-send
   let sentMessages = new Map(); // Track sent messages: element -> { messageId, text }
+  let sentByHash = new Map(); // Track sent messages by text hash -> { messageId, text, isMultiPart }
+  let autoSendFirstChunk = true; // Enabled by default
 
   const DEBUG = true;
 
@@ -124,24 +128,29 @@
     btn.className = 'persephone-inline-btn persephone-send-btn';
     btn.title = 'Send to Telegram';
     btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
-    
+
+    const textHash = hashText(text);
+
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       btn.style.opacity = '0.5';
       btn.style.pointerEvents = 'none';
-      
+
       const result = await sendToTelegram(text);
-      
+
       if (result.success) {
-        // Store message info for edit/delete
-        sentMessages.set(element, { 
-          messageId: result.messageId, 
+        const msgData = {
+          messageId: result.messageId,
           text: text,
-          isMultiPart: result.isMultiPart 
-        });
-        
+          isMultiPart: result.isMultiPart
+        };
+
+        // Store message info for edit/delete (by element and by hash)
+        sentMessages.set(element, msgData);
+        sentByHash.set(textHash, msgData);
+
         // Replace send button with action buttons
         replaceWithActionButtons(element, btn);
       } else {
@@ -153,8 +162,7 @@
     return btn;
   }
 
-  function replaceWithActionButtons(element, sendBtn) {
-    // Create button group
+  function createActionButtonGroup(element) {
     const btnGroup = document.createElement('span');
     btnGroup.className = 'persephone-btn-group';
 
@@ -183,12 +191,14 @@
       const result = await sendToTelegram(msgData.text);
 
       if (result.success) {
-        // Update with new message ID
-        sentMessages.set(element, {
+        const newMsgData = {
           messageId: result.messageId,
           text: msgData.text,
           isMultiPart: result.isMultiPart
-        });
+        };
+        // Update both maps
+        sentMessages.set(element, newMsgData);
+        sentByHash.set(hashText(msgData.text), newMsgData);
         showToast('✓ Message resent');
       }
 
@@ -230,7 +240,11 @@
       const success = await deleteFromTelegram(msgData.messageId);
 
       if (success) {
+        // Remove from both maps
+        const textHash = hashText(msgData.text);
         sentMessages.delete(element);
+        sentByHash.delete(textHash);
+
         // Replace action buttons with send button again
         const newSendBtn = createSendButton(element, extractText(element));
         btnGroup.replaceWith(newSendBtn);
@@ -246,6 +260,11 @@
     btnGroup.appendChild(editBtn);
     btnGroup.appendChild(deleteBtn);
 
+    return btnGroup;
+  }
+
+  function replaceWithActionButtons(element, sendBtn) {
+    const btnGroup = createActionButtonGroup(element);
     sendBtn.replaceWith(btnGroup);
   }
 
@@ -264,16 +283,29 @@
     const text = extractText(element);
     if (!text || text.length < 5) return false;
 
-    const btn = createSendButton(element, text);
-
-    element.style.position = 'relative';
-    element.appendChild(btn);
-
-    // Track
     const hash = hashText(text);
-    if (!seenTexts.has(hash)) {
-      seenTexts.add(hash);
-      debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
+    element.style.position = 'relative';
+
+    // Check if this text was already sent (container replacement scenario)
+    if (sentByHash.has(hash)) {
+      const msgData = sentByHash.get(hash);
+      // Update element reference in sentMessages
+      sentMessages.set(element, msgData);
+
+      // Create action buttons directly (already sent)
+      const btnGroup = createActionButtonGroup(element);
+      element.appendChild(btnGroup);
+      debug(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
+    } else {
+      // Create send button
+      const btn = createSendButton(element, text);
+      element.appendChild(btn);
+
+      // Track
+      if (!seenTexts.has(hash)) {
+        seenTexts.add(hash);
+        debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
+      }
     }
 
     return true;
@@ -320,12 +352,15 @@
   function checkForNewResponse() {
     const containers = document.querySelectorAll('.items-start .response-content-markdown');
     if (containers.length === 0) return;
-    
+
     const latest = containers[containers.length - 1];
-    
-    if (latest !== currentStreamingContainer) {
-      const isStreaming = isElementStreaming(latest);
-      
+    const isNewContainer = containers.length > lastContainerCount;
+    const isStreaming = isElementStreaming(latest);
+
+    // Detect new response (container count increased or new streaming on different container)
+    if (isNewContainer || (isStreaming && latest !== currentStreamingContainer)) {
+      lastContainerCount = containers.length;
+
       if (isStreaming) {
         debug('⚡ Streaming response detected');
         currentStreamingContainer = latest;
@@ -338,26 +373,101 @@
   }
 
   /**
+   * Watch the entire page for new response containers (faster than polling)
+   */
+  function startGlobalObserver() {
+    const mainContainer = document.body;
+
+    const observer = new MutationObserver((mutations) => {
+      // Quick check if any mutations might contain response content
+      let shouldCheck = false;
+
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === 1) { // Element node
+              // Check if this is or contains a response container
+              if (node.classList?.contains('response-content-markdown') ||
+                  node.querySelector?.('.response-content-markdown') ||
+                  node.classList?.contains('items-start') ||
+                  node.querySelector?.('.items-start')) {
+                shouldCheck = true;
+                break;
+              }
+            }
+          }
+        }
+        if (shouldCheck) break;
+      }
+
+      if (shouldCheck) {
+        checkForNewResponse();
+      }
+    });
+
+    observer.observe(mainContainer, {
+      childList: true,
+      subtree: true
+    });
+
+    debug('👁️ Global observer started');
+  }
+
+  /**
    * Watch a streaming response for new chunks
    */
   function startStreamingObserver(container) {
+    // Function to try auto-sending first chunk
+    const tryAutoSend = () => {
+      if (!autoSendFirstChunk || autoSentContainers.has(container)) return false;
+
+      // Find first complete (non-streaming) content element
+      const firstElement = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+      if (firstElement && !isElementStreaming(firstElement)) {
+        const text = extractText(firstElement);
+        if (text && text.length >= 5) {
+          debug('⚡ Auto-sending while streaming...');
+          autoSentContainers.add(container);
+          autoSendElement(firstElement);
+          return true;
+        }
+      }
+      return false;
+    };
+
     const observer = new MutationObserver(() => {
       processContainer(container);
-      
+      tryAutoSend();
+
       if (!isElementStreaming(container)) {
         debug('✅ Streaming complete');
         observer.disconnect();
+        clearInterval(autoSendInterval);
         setTimeout(() => processContainer(container), 200);
       }
     });
-    
+
     observer.observe(container, {
       childList: true,
       subtree: true,
       characterData: true
     });
-    
+
+    // Initial check
     processContainer(container);
+    tryAutoSend();
+
+    // Also poll quickly for auto-send in case mutations are missed
+    const autoSendInterval = setInterval(() => {
+      if (autoSentContainers.has(container) || !isElementStreaming(container)) {
+        clearInterval(autoSendInterval);
+        return;
+      }
+      tryAutoSend();
+    }, 100);
+
+    // Safety: clear interval after 30 seconds
+    setTimeout(() => clearInterval(autoSendInterval), 30000);
   }
 
   // ============================================
@@ -438,9 +548,15 @@
       const success = await editInTelegram(msgData.messageId, newText);
 
       if (success) {
+        // Remove old hash, add new hash
+        const oldHash = hashText(msgData.text);
+        sentByHash.delete(oldHash);
+
         // Update stored text
         msgData.text = newText;
         sentMessages.set(element, msgData);
+        sentByHash.set(hashText(newText), msgData);
+
         closeEditModal();
         showToast('✓ Message updated');
       } else {
@@ -855,29 +971,143 @@
   }
 
   // ============================================
+  // AUTO-SEND
+  // ============================================
+
+  async function loadAutoSendSetting() {
+    if (!isContextValid()) return;
+
+    try {
+      const settings = await chrome.storage.sync.get(['autoSendFirstChunk']);
+      autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
+      debug(`⚡ Auto-send first chunk: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+    } catch (e) {
+      debug('Failed to load auto-send setting');
+    }
+  }
+
+  function toggleAutoSend() {
+    autoSendFirstChunk = !autoSendFirstChunk;
+
+    // Save to storage
+    if (isContextValid()) {
+      chrome.storage.sync.set({ autoSendFirstChunk });
+    }
+
+    // Show indicator
+    showAutoSendIndicator(autoSendFirstChunk);
+    debug(`⚡ Auto-send toggled: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+  }
+
+  function showAutoSendIndicator(enabled) {
+    // Remove existing indicator
+    const existing = document.querySelector('.persephone-autosend-indicator');
+    if (existing) existing.remove();
+
+    const indicator = document.createElement('div');
+    indicator.className = 'persephone-autosend-indicator';
+    indicator.innerHTML = enabled
+      ? '⚡ Auto-send ON'
+      : '⚡ Auto-send OFF';
+    indicator.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: ${enabled ? '#1a1a1a' : '#666'};
+      color: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 9999999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: persephoneSlideIn 0.3s ease;
+    `;
+
+    document.body.appendChild(indicator);
+    setTimeout(() => indicator.remove(), 2000);
+  }
+
+  async function autoSendElement(element) {
+    const text = extractText(element);
+    if (!text || text.length < 5) return;
+
+    debug('⚡ Auto-sending first chunk...');
+
+    const result = await sendToTelegram(text);
+
+    if (result.success) {
+      const msgData = {
+        messageId: result.messageId,
+        text: text,
+        isMultiPart: result.isMultiPart
+      };
+
+      // Store in both maps (by element and by hash)
+      sentMessages.set(element, msgData);
+      sentByHash.set(hashText(text), msgData);
+
+      // Add button group instead of send button
+      const btn = element.querySelector('.persephone-inline-btn');
+      if (btn) {
+        replaceWithActionButtons(element, btn);
+      }
+
+      showToast('✓ Auto-sent first chunk');
+    }
+  }
+
+  // ============================================
   // INIT
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.3 (with latency optimizations)');
+    debug('🚀 Persephone v3.4 (with auto-send)');
 
     injectStyles();
-    
+
+    // Load auto-send setting
+    loadAutoSendSetting();
+
     // Trigger API preconnect immediately
     triggerPreconnect();
 
-    setTimeout(() => {
-      const count = scanAllResponses();
-      debug(`📋 Initial scan: ${count} buttons added`);
+    // Keyboard shortcut: Cmd+Shift+A (Mac) or Ctrl+Shift+A (Windows/Linux) to toggle auto-send
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        toggleAutoSend();
+      }
+    });
 
-      // Poll for new responses and rescan for DOM changes
+    // Listen for messages from popup
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.type === 'AUTO_SEND_CHANGED') {
+        autoSendFirstChunk = request.autoSendFirstChunk;
+        showAutoSendIndicator(autoSendFirstChunk);
+      }
+    });
+
+    setTimeout(() => {
+      // Set initial container count to avoid auto-sending existing responses
+      const existingContainers = document.querySelectorAll('.items-start .response-content-markdown');
+      lastContainerCount = existingContainers.length;
+
+      const count = scanAllResponses();
+      debug(`📋 Initial scan: ${count} buttons added, ${lastContainerCount} existing responses`);
+
+      // Start global observer for immediate detection of new responses
+      startGlobalObserver();
+
+      // Fallback polling (faster interval for reliability)
       setInterval(() => {
         checkForNewResponse();
         scanAllResponses();
-      }, 1000);
+      }, 300);
 
       debug('✅ Ready');
-    }, 1500);
+    }, 500);
   }
 
   init();

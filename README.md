@@ -4,13 +4,20 @@ A Chrome extension that monitors [grok.com](https://grok.com) and lets you send 
 
 ## Features
 
+### Auto-Send First Chunk
+- **Enabled by default** - automatically sends the first paragraph/heading when Grok starts responding
+- Toggle in extension popup or press `Alt+A` on page
+- Visual indicator shows when auto-send is ON/OFF
+- Get responses in Telegram instantly without clicking
+
 ### Inline Send Buttons
-- **Send button** appears next to each paragraph, list, code block, and heading as Grok responds
+- **Send button** appears next to each paragraph, list item, code block, and heading
 - Click to send individual chunks to Telegram instantly
 - Buttons appear in real-time as content streams
 
-### Edit & Delete
-- After sending, the send button transforms into **edit** and **delete** buttons
+### Resend, Edit & Delete
+- After sending, buttons transform into **resend**, **edit**, and **delete**
+- **Resend**: Send the same content again
 - **Edit**: Opens a modal to modify the message in Telegram
 - **Delete**: Removes the message from Telegram (with confirmation)
 - Green checkmark indicates sent status
@@ -121,15 +128,16 @@ Persephone/
 └── icons/
     ├── icon16.png
     ├── icon48.png
-    └── icon128.png
+    ├── icon128.png
+    └── logo.png       # Popup header logo
 ```
 
 ## Button States
 
 | State | Appearance | Actions |
 |-------|------------|---------|
-| Ready | Purple send icon | Click to send |
-| Sent | Green checkmark + blue edit + red delete | Edit or delete message |
+| Ready | White send icon | Click to send |
+| Sent | Green checkmark + white resend + gray edit + red delete | Resend, edit, or delete |
 | Streaming | No button (waiting) | Content still loading |
 
 ## Telegram Formatting
@@ -147,8 +155,12 @@ Content is converted to Telegram Markdown:
 | `<ol>` | `1. item` |
 | `<blockquote>` | `> quote` |
 
-## Keyboard Shortcuts (Edit Modal)
+## Keyboard Shortcuts
 
+### On Page
+- `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send first chunk ON/OFF
+
+### Edit Modal
 - `Ctrl/Cmd + Enter` - Save changes
 - `Escape` - Cancel and close
 
@@ -184,6 +196,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v3.4** - Auto-send first chunk (enabled by default), resend button, individual list item buttons, keyboard shortcut (Alt+A)
 - **v3.3** - Inline send/edit/delete buttons, streaming detection, latency optimizations
 - **v3.0** - Floating panel with manual chunk selection
 - **v2.0** - Real-time streaming detection with `animate-gaussian`
