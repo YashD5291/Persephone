@@ -580,34 +580,34 @@
         fill: white;
       }
       
-      /* Base Button Styles */
+      /* Base Button Styles (Send Button) */
       .persephone-inline-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 22px;
         height: 22px;
-        background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+        background: #fff;
         border: none;
         border-radius: 5px;
         cursor: pointer;
         margin-left: 6px;
         vertical-align: middle;
-        opacity: 0.7;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);
+        opacity: 0.85;
+        transition: all 0.15s ease;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
       }
       .persephone-inline-btn:hover {
         opacity: 1;
         transform: scale(1.1);
-        box-shadow: 0 4px 8px rgba(168, 85, 247, 0.4);
+        box-shadow: 0 2px 8px rgba(255, 255, 255, 0.3);
       }
       .persephone-inline-btn svg {
         width: 12px;
         height: 12px;
-        fill: white;
+        fill: #1a1a1a;
       }
-      
+
       /* In button group - smaller margins */
       .persephone-btn-group .persephone-inline-btn {
         margin-left: 0;
@@ -618,23 +618,21 @@
         width: 11px;
         height: 11px;
       }
-      
+
       /* Edit Button */
       .persephone-edit-btn {
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+        background: #525252;
       }
-      .persephone-edit-btn:hover {
-        box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+      .persephone-edit-btn svg {
+        fill: #fff;
       }
-      
+
       /* Delete Button */
       .persephone-delete-btn {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+        background: #dc2626;
       }
-      .persephone-delete-btn:hover {
-        box-shadow: 0 4px 8px rgba(239, 68, 68, 0.4);
+      .persephone-delete-btn svg {
+        fill: #fff;
       }
       
       /* Toast */
@@ -682,39 +680,39 @@
       }
       
       .persephone-modal {
-        background: #1a1a2e;
+        background: #fff;
         border-radius: 12px;
         width: 90%;
         max-width: 600px;
         max-height: 80vh;
         display: flex;
         flex-direction: column;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        border: 1px solid #e5e5e5;
         animation: persephoneSlideUp 0.3s ease;
       }
-      
+
       @keyframes persephoneSlideUp {
         from { opacity: 0; transform: translateY(20px); }
         to { opacity: 1; transform: translateY(0); }
       }
-      
+
       .persephone-modal-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 16px 20px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 1px solid #eee;
         font-family: system-ui, sans-serif;
         font-weight: 600;
         font-size: 16px;
-        color: #fff;
+        color: #1a1a1a;
       }
-      
+
       .persephone-modal-close {
         background: none;
         border: none;
-        color: #888;
+        color: #999;
         font-size: 24px;
         cursor: pointer;
         padding: 0;
@@ -722,23 +720,23 @@
         transition: color 0.2s;
       }
       .persephone-modal-close:hover {
-        color: #fff;
+        color: #1a1a1a;
       }
-      
+
       .persephone-modal-body {
         padding: 20px;
         flex: 1;
         overflow: auto;
       }
-      
+
       .persephone-edit-textarea {
         width: 100%;
         min-height: 200px;
         padding: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        border: 1px solid #e0e0e0;
         border-radius: 8px;
-        background: rgba(0, 0, 0, 0.3);
-        color: #fff;
+        background: #fafafa;
+        color: #1a1a1a;
         font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
         font-size: 14px;
         line-height: 1.5;
@@ -747,25 +745,25 @@
       }
       .persephone-edit-textarea:focus {
         outline: none;
-        border-color: #a855f7;
-        box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+        border-color: #1a1a1a;
+        box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
       }
-      
+
       .persephone-modal-hint {
         margin-top: 8px;
         font-family: system-ui, sans-serif;
         font-size: 12px;
         color: #888;
       }
-      
+
       .persephone-modal-footer {
         display: flex;
         justify-content: flex-end;
         gap: 10px;
         padding: 16px 20px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid #eee;
       }
-      
+
       .persephone-modal-btn {
         padding: 10px 20px;
         border-radius: 6px;
@@ -774,30 +772,29 @@
         font-size: 14px;
         font-weight: 500;
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.15s;
       }
-      
+
       .persephone-modal-cancel {
-        background: rgba(255, 255, 255, 0.1);
-        color: #ccc;
+        background: #fff;
+        color: #666;
+        border: 1px solid #e0e0e0;
       }
       .persephone-modal-cancel:hover {
-        background: rgba(255, 255, 255, 0.15);
-        color: #fff;
+        background: #f5f5f5;
+        color: #1a1a1a;
       }
-      
+
       .persephone-modal-save {
-        background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+        background: #1a1a1a;
         color: white;
       }
       .persephone-modal-save:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+        background: #333;
       }
       .persephone-modal-save:disabled {
-        opacity: 0.6;
+        opacity: 0.5;
         cursor: not-allowed;
-        transform: none;
       }
     `;
     document.head.appendChild(style);

@@ -16,15 +16,28 @@ body {
 }
 
 header {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   margin-bottom: 24px;
 }
 
+.logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.header-text {
+  flex: 1;
+}
+
 h1 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: #1a1a1a;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   letter-spacing: -0.3px;
 }
 
