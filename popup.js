@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const botTokenInput = document.getElementById('botToken');
   const chatIdInput = document.getElementById('chatId');
+  const enabledToggle = document.getElementById('enabledToggle');
   const autoSendToggle = document.getElementById('autoSendToggle');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
@@ -16,15 +17,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     'botToken',
     'chatId',
     'messageCount',
+    'extensionEnabled',
     'autoSendFirstChunk'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
   if (settings.chatId) chatIdInput.value = settings.chatId;
+  enabledToggle.checked = settings.extensionEnabled !== false; // Default true
   autoSendToggle.checked = settings.autoSendFirstChunk !== false; // Default true
   messageCount.textContent = settings.messageCount || 0;
 
-  updateStatus(settings.botToken && settings.chatId);
+  updateStatus(settings.botToken && settings.chatId, settings.extensionEnabled !== false);
 
   // Toggle token visibility
   toggleToken.addEventListener('click', () => {
@@ -85,10 +88,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     testBtn.textContent = 'Test Connection';
   });
 
-  function updateStatus(configured) {
-    if (configured) {
+  function updateStatus(configured, enabled = true) {
+    if (!enabled) {
+      statusDot.classList.remove('connected');
+      statusText.textContent = 'Disabled';
+    } else if (configured) {
       statusDot.classList.add('connected');
-      statusText.textContent = 'Configured';
+      statusText.textContent = 'Active';
     } else {
       statusDot.classList.remove('connected');
       statusText.textContent = 'Not configured';
@@ -103,6 +109,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 4000);
   }
 
+  // Extension enabled toggle change
+  enabledToggle.addEventListener('change', async () => {
+    const extensionEnabled = enabledToggle.checked;
+    await chrome.storage.sync.set({ extensionEnabled });
+
+    updateStatus(botTokenInput.value && chatIdInput.value, extensionEnabled);
+
+    // Notify content scripts
+    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'EXTENSION_ENABLED_CHANGED', extensionEnabled });
+      });
+    });
+  });
+
   // Auto-send toggle change
   autoSendToggle.addEventListener('change', async () => {
     const autoSendFirstChunk = autoSendToggle.checked;
@@ -116,13 +137,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Listen for message count updates
+  // Listen for storage changes
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.messageCount) {
       messageCount.textContent = changes.messageCount.newValue || 0;
     }
-    if (changes.autoSendFirstChunk) {
-      autoSendToggle.checked = changes.autoSendFirstChunk.newValue || false;
+    if (changes.extensionEnabled !== undefined) {
+      enabledToggle.checked = changes.extensionEnabled.newValue !== false;
+      updateStatus(botTokenInput.value && chatIdInput.value, changes.extensionEnabled.newValue !== false);
+    }
+    if (changes.autoSendFirstChunk !== undefined) {
+      autoSendToggle.checked = changes.autoSendFirstChunk.newValue !== false;
     }
   });
 });

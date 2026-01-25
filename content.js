@@ -10,6 +10,7 @@
   let autoSentContainers = new WeakSet(); // Track containers that had auto-send
   let sentMessages = new Map(); // Track sent messages: element -> { messageId, text }
   let sentByHash = new Map(); // Track sent messages by text hash -> { messageId, text, isMultiPart }
+  let extensionEnabled = true; // Master toggle - enabled by default
   let autoSendFirstChunk = true; // Enabled by default
 
   const DEBUG = true;
@@ -315,7 +316,7 @@
    * Scan a container and add buttons to all content elements
    */
   function processContainer(container) {
-    if (!container) return 0;
+    if (!container || !extensionEnabled) return 0;
 
     // Add buttons to lists (full) and individual list items
     const elements = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, li, pre, blockquote, table');
@@ -332,17 +333,19 @@
    * Scan ALL Grok responses on the page
    */
   function scanAllResponses() {
+    if (!extensionEnabled) return 0;
+
     const containers = document.querySelectorAll('.items-start .response-content-markdown');
     let totalAdded = 0;
-    
+
     containers.forEach(container => {
       totalAdded += processContainer(container);
     });
-    
+
     if (totalAdded > 0) {
       debug(`📦 Added ${totalAdded} buttons`);
     }
-    
+
     return totalAdded;
   }
 
@@ -350,6 +353,8 @@
    * Check for new streaming response
    */
   function checkForNewResponse() {
+    if (!extensionEnabled) return;
+
     const containers = document.querySelectorAll('.items-start .response-content-markdown');
     if (containers.length === 0) return;
 
@@ -974,16 +979,73 @@
   // AUTO-SEND
   // ============================================
 
-  async function loadAutoSendSetting() {
+  async function loadSettings() {
     if (!isContextValid()) return;
 
     try {
-      const settings = await chrome.storage.sync.get(['autoSendFirstChunk']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk']);
+      extensionEnabled = settings.extensionEnabled !== false; // Default true
       autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
-      debug(`⚡ Auto-send first chunk: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+      debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
     } catch (e) {
-      debug('Failed to load auto-send setting');
+      debug('Failed to load settings');
     }
+  }
+
+  function toggleExtensionEnabled() {
+    extensionEnabled = !extensionEnabled;
+
+    // Save to storage
+    if (isContextValid()) {
+      chrome.storage.sync.set({ extensionEnabled });
+    }
+
+    // Show indicator and update UI
+    showExtensionIndicator(extensionEnabled);
+
+    if (extensionEnabled) {
+      // Re-scan when enabled
+      scanAllResponses();
+    } else {
+      // Remove all buttons when disabled
+      removeAllButtons();
+    }
+
+    debug(`🔌 Extension toggled: ${extensionEnabled ? 'ON' : 'OFF'}`);
+  }
+
+  function showExtensionIndicator(enabled) {
+    const existing = document.querySelector('.persephone-extension-indicator');
+    if (existing) existing.remove();
+
+    const indicator = document.createElement('div');
+    indicator.className = 'persephone-extension-indicator';
+    indicator.innerHTML = enabled
+      ? '✓ Persephone ON'
+      : '✗ Persephone OFF';
+    indicator.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: ${enabled ? '#22c55e' : '#666'};
+      color: white;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 9999999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: persephoneSlideIn 0.3s ease;
+    `;
+
+    document.body.appendChild(indicator);
+    setTimeout(() => indicator.remove(), 2000);
+  }
+
+  function removeAllButtons() {
+    document.querySelectorAll('.persephone-inline-btn, .persephone-btn-group').forEach(el => el.remove());
+    debug('🧹 Removed all buttons');
   }
 
   function toggleAutoSend() {
@@ -1063,26 +1125,43 @@
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.4 (with auto-send)');
+    debug('🚀 Persephone v3.5 (with master toggle)');
 
     injectStyles();
 
-    // Load auto-send setting
-    loadAutoSendSetting();
+    // Load settings
+    loadSettings();
 
     // Trigger API preconnect immediately
     triggerPreconnect();
 
-    // Keyboard shortcut: Cmd+Shift+A (Mac) or Ctrl+Shift+A (Windows/Linux) to toggle auto-send
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        toggleAutoSend();
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+        // Cmd/Ctrl+Shift+E - Toggle extension
+        if (e.key.toLowerCase() === 'e') {
+          e.preventDefault();
+          toggleExtensionEnabled();
+        }
+        // Cmd/Ctrl+Shift+A - Toggle auto-send
+        if (e.key.toLowerCase() === 'a') {
+          e.preventDefault();
+          toggleAutoSend();
+        }
       }
     });
 
     // Listen for messages from popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.type === 'EXTENSION_ENABLED_CHANGED') {
+        extensionEnabled = request.extensionEnabled;
+        showExtensionIndicator(extensionEnabled);
+        if (extensionEnabled) {
+          scanAllResponses();
+        } else {
+          removeAllButtons();
+        }
+      }
       if (request.type === 'AUTO_SEND_CHANGED') {
         autoSendFirstChunk = request.autoSendFirstChunk;
         showAutoSendIndicator(autoSendFirstChunk);

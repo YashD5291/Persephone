@@ -158,6 +158,7 @@ Content is converted to Telegram Markdown:
 ## Keyboard Shortcuts
 
 ### On Page
+- `Cmd + Shift + E` (Mac) / `Ctrl + Shift + E` (Windows/Linux) - Toggle extension ON/OFF
 - `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send first chunk ON/OFF
 
 ### Edit Modal
@@ -196,7 +197,8 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
-- **v3.4** - Auto-send first chunk (enabled by default), resend button, individual list item buttons, keyboard shortcut (Alt+A)
+- **v3.5** - Master toggle to enable/disable extension, keyboard shortcuts (Cmd/Ctrl+Shift+E/A)
+- **v3.4** - Auto-send first chunk (enabled by default), resend button, individual list item buttons
 - **v3.3** - Inline send/edit/delete buttons, streaming detection, latency optimizations
 - **v3.0** - Floating panel with manual chunk selection
 - **v2.0** - Real-time streaming detection with `animate-gaussian`
