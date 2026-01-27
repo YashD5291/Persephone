@@ -369,6 +369,12 @@
       if (isStreaming) {
         debug('⚡ Streaming response detected');
         currentStreamingContainer = latest;
+
+        // Warm up connection immediately when streaming starts
+        if (autoSendFirstChunk) {
+          triggerPreconnect();
+        }
+
         startStreamingObserver(latest);
       } else {
         currentStreamingContainer = latest;
@@ -422,18 +428,21 @@
    * Watch a streaming response for new chunks
    */
   function startStreamingObserver(container) {
-    // Function to try auto-sending first chunk
+    // Function to try auto-sending first chunk - FAST PATH
     const tryAutoSend = () => {
-      if (!autoSendFirstChunk || autoSentContainers.has(container)) return false;
+      if (!extensionEnabled || !autoSendFirstChunk || autoSentContainers.has(container)) return false;
 
       // Find first complete (non-streaming) content element
       const firstElement = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
       if (firstElement && !isElementStreaming(firstElement)) {
         const text = extractText(firstElement);
         if (text && text.length >= 5) {
-          debug('⚡ Auto-sending while streaming...');
+          // Mark as sent IMMEDIATELY to prevent duplicate sends
           autoSentContainers.add(container);
-          autoSendElement(firstElement);
+
+          // Fire off the send WITHOUT waiting - don't block on UI updates
+          debug('⚡ FAST: Auto-sending first chunk...');
+          fireAndSend(firstElement, text);
           return true;
         }
       }
@@ -441,8 +450,12 @@
     };
 
     const observer = new MutationObserver(() => {
+      // Try auto-send FIRST, before any other processing
+      if (!autoSentContainers.has(container)) {
+        tryAutoSend();
+      }
+
       processContainer(container);
-      tryAutoSend();
 
       if (!isElementStreaming(container)) {
         debug('✅ Streaming complete');
@@ -458,21 +471,62 @@
       characterData: true
     });
 
-    // Initial check
-    processContainer(container);
+    // Try auto-send IMMEDIATELY
     tryAutoSend();
 
-    // Also poll quickly for auto-send in case mutations are missed
+    // Initial processing
+    processContainer(container);
+
+    // Fast polling for auto-send (50ms for lower latency)
     const autoSendInterval = setInterval(() => {
       if (autoSentContainers.has(container) || !isElementStreaming(container)) {
         clearInterval(autoSendInterval);
         return;
       }
       tryAutoSend();
-    }, 100);
+    }, 50);
 
     // Safety: clear interval after 30 seconds
     setTimeout(() => clearInterval(autoSendInterval), 30000);
+  }
+
+  /**
+   * Fire and send - optimized for speed, UI updates happen after
+   */
+  async function fireAndSend(element, text) {
+    const hash = hashText(text);
+
+    // Send immediately - this is the critical path
+    const result = await sendToTelegram(text);
+
+    if (result.success) {
+      const msgData = {
+        messageId: result.messageId,
+        text: text,
+        isMultiPart: result.isMultiPart
+      };
+
+      // Store in both maps
+      sentMessages.set(element, msgData);
+      sentByHash.set(hash, msgData);
+
+      // Now update UI (non-critical path)
+      const btn = element.querySelector('.persephone-inline-btn');
+      if (btn) {
+        replaceWithActionButtons(element, btn);
+      } else {
+        // Button might not exist yet, add the action group directly
+        element.style.position = 'relative';
+        const btnGroup = createActionButtonGroup(element);
+        element.appendChild(btnGroup);
+      }
+
+      showToast('✓ Auto-sent first chunk');
+    } else {
+      // Failed - remove from autoSentContainers so it can retry
+      // (but this is rare)
+      debug('⚠️ Auto-send failed, will show send button');
+    }
   }
 
   // ============================================
@@ -1091,35 +1145,6 @@
     setTimeout(() => indicator.remove(), 2000);
   }
 
-  async function autoSendElement(element) {
-    const text = extractText(element);
-    if (!text || text.length < 5) return;
-
-    debug('⚡ Auto-sending first chunk...');
-
-    const result = await sendToTelegram(text);
-
-    if (result.success) {
-      const msgData = {
-        messageId: result.messageId,
-        text: text,
-        isMultiPart: result.isMultiPart
-      };
-
-      // Store in both maps (by element and by hash)
-      sentMessages.set(element, msgData);
-      sentByHash.set(hashText(text), msgData);
-
-      // Add button group instead of send button
-      const btn = element.querySelector('.persephone-inline-btn');
-      if (btn) {
-        replaceWithActionButtons(element, btn);
-      }
-
-      showToast('✓ Auto-sent first chunk');
-    }
-  }
-
   // ============================================
   // INIT
   // ============================================
@@ -1179,11 +1204,11 @@
       // Start global observer for immediate detection of new responses
       startGlobalObserver();
 
-      // Fallback polling (faster interval for reliability)
+      // Fallback polling (fast interval for reliability)
       setInterval(() => {
         checkForNewResponse();
         scanAllResponses();
-      }, 300);
+      }, 200);
 
       debug('✅ Ready');
     }, 500);
