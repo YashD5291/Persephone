@@ -13,6 +13,10 @@
   let extensionEnabled = true; // Master toggle - enabled by default
   let autoSendFirstChunk = true; // Enabled by default
 
+  const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
+  let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
+  let containerQuestions = new WeakMap(); // container -> question text at time of streaming start
+
   const DEBUG = true;
 
   function debug(...args) {
@@ -43,6 +47,32 @@
       h = h & h;
     }
     return h.toString();
+  }
+
+  /**
+   * Get the latest user question from the conversation DOM.
+   * User messages use items-end (right-aligned), AI responses use items-start (left-aligned).
+   * Extract text from .message-bubble to avoid grabbing button labels.
+   */
+  function getLatestUserQuestion(container) {
+    try {
+      // User messages have items-end + contain a .message-bubble (filters out model picker etc)
+      const allUserMsgs = document.querySelectorAll('[class*="items-end"] .message-bubble');
+      if (allUserMsgs.length === 0) return '';
+      const question = allUserMsgs[allUserMsgs.length - 1].textContent.trim();
+      return question;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function shouldSkipAutoSend(question) {
+    if (!question || autoSendSkipKeywords.length === 0) return false;
+    const lower = question.toLowerCase();
+    return autoSendSkipKeywords.some(kw => {
+      const k = kw.toLowerCase().trim();
+      return k && lower.includes(k);
+    });
   }
 
   // ============================================
@@ -370,6 +400,11 @@
         debug('⚡ Streaming response detected');
         currentStreamingContainer = latest;
 
+        // Capture the user question for keyword skip checking
+        const question = getLatestUserQuestion(latest);
+        containerQuestions.set(latest, question);
+        if (question) debug(`📝 Question: "${question.substring(0, 80)}"`);
+
         // Warm up connection immediately when streaming starts
         if (autoSendFirstChunk) {
           triggerPreconnect();
@@ -431,6 +466,14 @@
     // Function to try auto-sending first chunk - FAST PATH
     const tryAutoSend = () => {
       if (!extensionEnabled || !autoSendFirstChunk || autoSentContainers.has(container)) return false;
+
+      // Check if user question contains skip keywords
+      const question = containerQuestions.get(container) || '';
+      if (shouldSkipAutoSend(question)) {
+        debug('⏭️ Skipping auto-send: keyword match in question');
+        autoSentContainers.add(container);
+        return false;
+      }
 
       // Find first complete (non-streaming) content element
       const firstElement = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
@@ -1037,10 +1080,11 @@
     if (!isContextValid()) return;
 
     try {
-      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords']);
       extensionEnabled = settings.extensionEnabled !== false; // Default true
       autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
-      debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+      autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
+      debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
     } catch (e) {
       debug('Failed to load settings');
     }
@@ -1190,6 +1234,10 @@
       if (request.type === 'AUTO_SEND_CHANGED') {
         autoSendFirstChunk = request.autoSendFirstChunk;
         showAutoSendIndicator(autoSendFirstChunk);
+      }
+      if (request.type === 'SKIP_KEYWORDS_CHANGED') {
+        autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
+        debug(`📝 Skip keywords updated: ${autoSendSkipKeywords.length} keywords`);
       }
     });
 

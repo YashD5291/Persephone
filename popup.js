@@ -11,6 +11,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const messageCount = document.getElementById('messageCount');
   const toggleToken = document.getElementById('toggleToken');
   const tokenIcon = document.getElementById('tokenIcon');
+  const skipKeywordsInput = document.getElementById('skipKeywords');
+  const resetKeywordsBtn = document.getElementById('resetKeywords');
+  const keywordsSection = document.getElementById('keywordsSection');
+
+  const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
 
   // Load saved settings
   const settings = await chrome.storage.sync.get([
@@ -18,7 +23,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'chatId',
     'messageCount',
     'extensionEnabled',
-    'autoSendFirstChunk'
+    'autoSendFirstChunk',
+    'autoSendSkipKeywords'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
@@ -26,6 +32,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
   autoSendToggle.checked = settings.autoSendFirstChunk !== false; // Default true
   messageCount.textContent = settings.messageCount || 0;
+
+  // Load skip keywords
+  const keywords = settings.autoSendSkipKeywords || DEFAULT_SKIP_KEYWORDS;
+  skipKeywordsInput.value = keywords.join(', ');
+  updateKeywordsVisibility(settings.autoSendFirstChunk !== false);
 
   updateStatus(settings.botToken && settings.chatId, settings.extensionEnabled !== false);
 
@@ -128,6 +139,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   autoSendToggle.addEventListener('change', async () => {
     const autoSendFirstChunk = autoSendToggle.checked;
     await chrome.storage.sync.set({ autoSendFirstChunk });
+    updateKeywordsVisibility(autoSendFirstChunk);
 
     // Notify content scripts
     chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
@@ -136,6 +148,39 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
   });
+
+  // Keywords: save on blur (when user finishes editing)
+  let keywordsSaveTimeout = null;
+  skipKeywordsInput.addEventListener('input', () => {
+    clearTimeout(keywordsSaveTimeout);
+    keywordsSaveTimeout = setTimeout(saveKeywords, 800);
+  });
+  skipKeywordsInput.addEventListener('blur', saveKeywords);
+
+  async function saveKeywords() {
+    clearTimeout(keywordsSaveTimeout);
+    const raw = skipKeywordsInput.value;
+    const keywords = raw.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    await chrome.storage.sync.set({ autoSendSkipKeywords: keywords });
+
+    // Notify content scripts
+    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'SKIP_KEYWORDS_CHANGED', keywords });
+      });
+    });
+  }
+
+  // Reset keywords to defaults
+  resetKeywordsBtn.addEventListener('click', async () => {
+    skipKeywordsInput.value = DEFAULT_SKIP_KEYWORDS.join(', ');
+    await saveKeywords();
+    showMessage('Keywords reset to defaults', 'success');
+  });
+
+  function updateKeywordsVisibility(autoSendEnabled) {
+    keywordsSection.style.display = autoSendEnabled ? 'block' : 'none';
+  }
 
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes) => {
@@ -147,7 +192,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateStatus(botTokenInput.value && chatIdInput.value, changes.extensionEnabled.newValue !== false);
     }
     if (changes.autoSendFirstChunk !== undefined) {
-      autoSendToggle.checked = changes.autoSendFirstChunk.newValue !== false;
+      const enabled = changes.autoSendFirstChunk.newValue !== false;
+      autoSendToggle.checked = enabled;
+      updateKeywordsVisibility(enabled);
+    }
+    if (changes.autoSendSkipKeywords !== undefined) {
+      const kw = changes.autoSendSkipKeywords.newValue || DEFAULT_SKIP_KEYWORDS;
+      skipKeywordsInput.value = kw.join(', ');
     }
   });
 });

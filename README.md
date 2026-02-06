@@ -6,9 +6,10 @@ A Chrome extension that monitors [grok.com](https://grok.com) and lets you send 
 
 ### Auto-Send First Chunk
 - **Enabled by default** - automatically sends the first paragraph/heading when Grok starts responding
-- Toggle in extension popup or press `Alt+A` on page
+- Toggle in extension popup or press `Cmd/Ctrl+Shift+A` on page
 - Visual indicator shows when auto-send is ON/OFF
 - Get responses in Telegram instantly without clicking
+- **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking Grok to shorten/rewrite — no point auto-sending the first chunk of a rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
 
 ### Inline Send Buttons
 - **Send button** appears next to each paragraph, list item, code block, and heading
@@ -197,6 +198,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v3.6** - Skip keywords for auto-send (configurable via popup, skips auto-send when question contains keywords like "shorter")
 - **v3.5** - Master toggle to enable/disable extension, keyboard shortcuts (Cmd/Ctrl+Shift+E/A)
 - **v3.4** - Auto-send first chunk (enabled by default), resend button, individual list item buttons
 - **v3.3** - Inline send/edit/delete buttons, streaming detection, latency optimizations
