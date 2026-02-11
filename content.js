@@ -432,7 +432,17 @@
     const hash = hashText(text);
     element.style.position = 'relative';
 
-    // Long paragraph: split into two sub-chunks
+    // Check if this text was already sent (e.g. live-streamed first chunk after DOM rebuild)
+    if (sentByHash.has(hash)) {
+      const msgData = sentByHash.get(hash);
+      sentMessages.set(element, msgData);
+      const btnGroup = createActionButtonGroup(element);
+      element.appendChild(btnGroup);
+      debug(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
+      return true;
+    }
+
+    // Long paragraph: split into two sub-chunks (only for non-streamed paragraphs)
     if (text.length > splitThreshold) {
       const [chunk1, chunk2] = splitText(text);
       const hash1 = hashText(chunk1);
@@ -470,26 +480,13 @@
       return true;
     }
 
-    // Check if this text was already sent (container replacement scenario)
-    if (sentByHash.has(hash)) {
-      const msgData = sentByHash.get(hash);
-      // Update element reference in sentMessages
-      sentMessages.set(element, msgData);
+    // Create send button
+    const btn = createSendButton(element, text);
+    element.appendChild(btn);
 
-      // Create action buttons directly (already sent)
-      const btnGroup = createActionButtonGroup(element);
-      element.appendChild(btnGroup);
-      debug(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
-    } else {
-      // Create send button
-      const btn = createSendButton(element, text);
-      element.appendChild(btn);
-
-      // Track
-      if (!seenTexts.has(hash)) {
-        seenTexts.add(hash);
-        debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
-      }
+    if (!seenTexts.has(hash)) {
+      seenTexts.add(hash);
+      debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
     }
 
     return true;
@@ -755,48 +752,72 @@
     firstElement.appendChild(streamingIndicator);
 
     let streamFinalized = false;
+    // Anchor: first ~50 chars of initial text, used to verify element identity
+    const textAnchor = lastSentText.substring(0, 50);
 
-    // Finalize: final edit, update maps, show buttons
+    /**
+     * Get the best available text for the first paragraph.
+     * Tries: original element → new first <p> in container (after DOM rebuild) → lastSentText
+     */
+    const getFinalText = () => {
+      const anchor = textAnchor.substring(0, 30);
+
+      // 1. Try original element (works if still connected, or detached with frozen text)
+      const origText = extractText(firstElement);
+      if (origText && origText.startsWith(anchor)) {
+        // If element is detached, text may be stale — check container for a fresher version
+        if (!firstElement.isConnected) {
+          const newFirst = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+          if (newFirst) {
+            const newText = extractText(newFirst);
+            if (newText && newText.startsWith(anchor)) {
+              // New element has text that starts the same — use whichever is longer (more complete)
+              return newText.length >= origText.length ? newText : origText;
+            }
+          }
+        }
+        return origText;
+      }
+
+      // 2. Original element is stale/reused — try container's current first <p>
+      const newFirst = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+      if (newFirst) {
+        const newText = extractText(newFirst);
+        if (newText && newText.startsWith(anchor)) return newText;
+      }
+
+      // 3. Fall back to last streamed text
+      return lastSentText;
+    };
+
+    // Finalize: final edit with full text (no splitting for first chunk), update maps, show buttons
     const finalize = async () => {
       if (streamFinalized) return;
       streamFinalized = true;
       clearInterval(streamInterval);
       clearInterval(stopCheckInterval);
 
-      const finalText = extractText(firstElement);
+      const finalText = getFinalText();
       if (!finalText || finalText.length < 5) return;
 
-      const sendText = finalText.length > splitThreshold ? splitText(finalText)[0] : finalText;
-
-      // Final edit with proper formatting
-      if (sendText !== lastSentText) {
-        await editInTelegram(messageId, sendText);
+      // First chunk is always sent in full — no split threshold
+      if (finalText !== lastSentText) {
+        await editInTelegram(messageId, finalText);
       }
 
       // Store in maps for edit/delete
       const msgData = {
         messageId,
-        text: sendText,
+        text: finalText,
         isMultiPart: result.isMultiPart
       };
-      sentMessages.set(firstElement, msgData);
-      sentByHash.set(hashText(sendText), msgData);
+      sentByHash.set(hashText(finalText), msgData);
+      if (firstElement.isConnected) {
+        sentMessages.set(firstElement, msgData);
 
-      // Remove streaming indicator
-      const indicator = firstElement.querySelector('.persephone-streaming');
-      if (indicator) indicator.remove();
-
-      // Add appropriate buttons
-      if (finalText.length > splitThreshold) {
-        const sent1 = document.createElement('span');
-        sent1.className = 'persephone-sent-indicator';
-        sent1.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-        sent1.title = 'Part 1 sent (streamed)';
-        firstElement.appendChild(sent1);
-
-        const [, chunk2] = splitText(finalText);
-        firstElement.appendChild(createSplitSendButton(firstElement, chunk2, 2));
-      } else {
+        // Clean up streaming indicator, add action buttons
+        const indicator = firstElement.querySelector('.persephone-streaming');
+        if (indicator) indicator.remove();
         const btnGroup = createActionButtonGroup(firstElement);
         firstElement.appendChild(btnGroup);
       }
@@ -805,19 +826,16 @@
       showToast('✓ Streamed first chunk');
     };
 
-    // Poll and edit every 500ms
+    // Poll and edit every 500ms — stream raw text, no splitting mid-stream
+    const anchor = textAnchor.substring(0, 30);
     const streamInterval = setInterval(() => {
       if (streamFinalized) return;
 
-      const currentText = extractText(firstElement);
-      if (!currentText || currentText === lastSentText) return;
+      const text = extractText(firstElement);
+      if (!text || !text.startsWith(anchor) || text === lastSentText) return;
 
-      // For split text, only stream the first half
-      const sendText = currentText.length > splitThreshold ? splitText(currentText)[0] : currentText;
-      if (sendText === lastSentText) return;
-
-      lastSentText = sendText;
-      streamEditTelegram(messageId, sendText);
+      lastSentText = text;
+      streamEditTelegram(messageId, text);
     }, 500);
 
     // Watch for stop conditions (paragraph complete or streaming ended)
