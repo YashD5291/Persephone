@@ -1,5 +1,5 @@
-// Persephone - Content Script for grok.com
-// v3.3 - Inline send buttons with edit/delete + latency optimizations
+// Persephone - Content Script for grok.com and claude.ai
+// v3.4 - Multi-site support (Grok + Claude)
 
 (function() {
   'use strict';
@@ -19,6 +19,18 @@
 
   const DEBUG = true;
 
+  const SITE = window.location.hostname.includes('claude.ai') ? 'claude' : 'grok';
+
+  const SELECTORS = SITE === 'claude' ? {
+    responseContainer: 'div[data-is-streaming] .standard-markdown, div[data-is-streaming] .progressive-markdown',
+    userQuestion: null,
+    cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
+  } : {
+    responseContainer: '.items-start .response-content-markdown',
+    userQuestion: '[class*="items-end"] .message-bubble',
+    cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator, .animate-gaussian, .citation',
+  };
+
   function debug(...args) {
     if (DEBUG) console.log('[Persephone]', ...args);
   }
@@ -36,6 +48,10 @@
   }
 
   function isElementStreaming(element) {
+    if (SITE === 'claude') {
+      const streamingAncestor = element.closest('[data-is-streaming]');
+      return streamingAncestor?.getAttribute('data-is-streaming') === 'true';
+    }
     return element.querySelector('.animate-gaussian') !== null;
   }
 
@@ -56,8 +72,8 @@
    */
   function getLatestUserQuestion(container) {
     try {
-      // User messages have items-end + contain a .message-bubble (filters out model picker etc)
-      const allUserMsgs = document.querySelectorAll('[class*="items-end"] .message-bubble');
+      if (!SELECTORS.userQuestion) return '';
+      const allUserMsgs = document.querySelectorAll(SELECTORS.userQuestion);
       if (allUserMsgs.length === 0) return '';
       const question = allUserMsgs[allUserMsgs.length - 1].textContent.trim();
       return question;
@@ -105,7 +121,7 @@
     const clone = element.cloneNode(true);
     
     // Remove unwanted elements
-    clone.querySelectorAll('button, svg, img, .persephone-inline-btn, .persephone-btn-group, .animate-gaussian, .citation')
+    clone.querySelectorAll(SELECTORS.cleanTextRemove)
       .forEach(el => el.remove());
 
     // Convert formatting
@@ -489,12 +505,12 @@
   }
 
   /**
-   * Scan ALL Grok responses on the page
+   * Scan ALL responses on the page
    */
   function scanAllResponses() {
     if (!extensionEnabled) return 0;
 
-    const containers = document.querySelectorAll('.items-start .response-content-markdown');
+    const containers = document.querySelectorAll(SELECTORS.responseContainer);
     let totalAdded = 0;
 
     containers.forEach(container => {
@@ -514,7 +530,7 @@
   function checkForNewResponse() {
     if (!extensionEnabled) return;
 
-    const containers = document.querySelectorAll('.items-start .response-content-markdown');
+    const containers = document.querySelectorAll(SELECTORS.responseContainer);
     if (containers.length === 0) return;
 
     const latest = containers[containers.length - 1];
@@ -562,10 +578,16 @@
           for (const node of mutation.addedNodes) {
             if (node.nodeType === 1) { // Element node
               // Check if this is or contains a response container
-              if (node.classList?.contains('response-content-markdown') ||
-                  node.querySelector?.('.response-content-markdown') ||
-                  node.classList?.contains('items-start') ||
-                  node.querySelector?.('.items-start')) {
+              if (SITE === 'claude'
+                ? (node.classList?.contains('standard-markdown') ||
+                   node.classList?.contains('progressive-markdown') ||
+                   node.querySelector?.('.standard-markdown, .progressive-markdown') ||
+                   node.matches?.('[data-is-streaming]') ||
+                   node.querySelector?.('[data-is-streaming]'))
+                : (node.classList?.contains('response-content-markdown') ||
+                   node.querySelector?.('.response-content-markdown') ||
+                   node.classList?.contains('items-start') ||
+                   node.querySelector?.('.items-start'))) {
                 shouldCheck = true;
                 break;
               }
@@ -1413,7 +1435,7 @@
 
     setTimeout(() => {
       // Set initial container count to avoid auto-sending existing responses
-      const existingContainers = document.querySelectorAll('.items-start .response-content-markdown');
+      const existingContainers = document.querySelectorAll(SELECTORS.responseContainer);
       lastContainerCount = existingContainers.length;
 
       const count = scanAllResponses();
