@@ -12,6 +12,7 @@
   let sentByHash = new Map(); // Track sent messages by text hash -> { messageId, text, isMultiPart }
   let extensionEnabled = true; // Master toggle - enabled by default
   let autoSendFirstChunk = true; // Enabled by default
+  let splitThreshold = 250; // Character count above which paragraphs get split send buttons
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
@@ -432,7 +433,7 @@
     element.style.position = 'relative';
 
     // Long paragraph: split into two sub-chunks
-    if (text.length > 300) {
+    if (text.length > splitThreshold) {
       const [chunk1, chunk2] = splitText(text);
       const hash1 = hashText(chunk1);
       const hash2 = hashText(chunk2);
@@ -621,47 +622,17 @@
    * Watch a streaming response for new chunks
    */
   function startStreamingObserver(container) {
-    // Function to try auto-sending first chunk - FAST PATH
-    const tryAutoSend = () => {
-      if (!extensionEnabled || !autoSendFirstChunk || autoSentContainers.has(container)) return false;
-
-      // Check if user question contains skip keywords
-      const question = containerQuestions.get(container) || '';
-      if (shouldSkipAutoSend(question)) {
-        debug('⏭️ Skipping auto-send: keyword match in question');
-        autoSentContainers.add(container);
-        return false;
-      }
-
-      // Find first complete (non-streaming) content element
-      const firstElement = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
-      if (firstElement && !isElementStreaming(firstElement)) {
-        const text = extractText(firstElement);
-        if (text && text.length >= 5) {
-          // Mark as sent IMMEDIATELY to prevent duplicate sends
-          autoSentContainers.add(container);
-
-          // Fire off the send WITHOUT waiting - don't block on UI updates
-          debug('⚡ FAST: Auto-sending first chunk...');
-          fireAndSend(firstElement, text);
-          return true;
-        }
-      }
-      return false;
-    };
+    // Start live streaming the first chunk (runs independently)
+    if (extensionEnabled && autoSendFirstChunk && !autoSentContainers.has(container)) {
+      startLiveStream(container);
+    }
 
     const observer = new MutationObserver(() => {
-      // Try auto-send FIRST, before any other processing
-      if (!autoSentContainers.has(container)) {
-        tryAutoSend();
-      }
-
       processContainer(container);
 
       if (!isElementStreaming(container)) {
         debug('✅ Streaming complete');
         observer.disconnect();
-        clearInterval(autoSendInterval);
         setTimeout(() => processContainer(container), 200);
       }
     });
@@ -678,80 +649,189 @@
     }
     observer.observe(container, observerOptions);
 
-    // Try auto-send IMMEDIATELY
-    tryAutoSend();
-
     // Initial processing
     processContainer(container);
+  }
 
-    // Fast polling for auto-send (50ms for lower latency)
-    const autoSendInterval = setInterval(() => {
-      if (autoSentContainers.has(container) || !isElementStreaming(container)) {
-        clearInterval(autoSendInterval);
-        return;
-      }
-      tryAutoSend();
-    }, 50);
+  // ============================================
+  // LIVE STREAM FIRST CHUNK
+  // ============================================
 
-    // Safety: clear interval after 30 seconds
-    setTimeout(() => clearInterval(autoSendInterval), 30000);
+  /**
+   * Fire-and-forget edit for live streaming (no await, suppresses errors)
+   */
+  function streamEditTelegram(messageId, text) {
+    if (!isContextValid()) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: 'STREAM_EDIT',
+        messageId: messageId,
+        text: text
+      }).catch(() => {});
+    } catch (e) {
+      // Ignore
+    }
   }
 
   /**
-   * Fire and send - optimized for speed, UI updates happen after
+   * Wait for the first content element in a container to have enough text.
+   * Resolves with the element, or null if streaming ends first.
    */
-  async function fireAndSend(element, text) {
-    // For long paragraphs, only auto-send the first half
-    const sendText = text.length > 300 ? splitText(text)[0] : text;
-    const hash = hashText(sendText);
+  function waitForFirstElement(container, minChars) {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const check = () => {
+        if (resolved) return;
+        const el = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+        if (el) {
+          const text = extractText(el);
+          if (text && text.length >= minChars) {
+            resolved = true;
+            resolve(el);
+            return;
+          }
+        }
+        if (!isElementStreaming(container)) {
+          resolved = true;
+          resolve(el || null);
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
+      // Safety: resolve with whatever we have after 10s
+      setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        resolve(container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote'));
+      }, 10000);
+    });
+  }
 
-    // Send immediately - this is the critical path
-    const result = await sendToTelegram(sendText);
+  /**
+   * Live stream the first chunk to Telegram.
+   * Sends initial text immediately, then edits the message every 500ms as text grows.
+   */
+  async function startLiveStream(container) {
+    // Check skip keywords
+    const question = containerQuestions.get(container) || '';
+    if (shouldSkipAutoSend(question)) {
+      debug('⏭️ Skipping live stream: keyword match');
+      autoSentContainers.add(container);
+      return;
+    }
 
-    if (result.success) {
+    // Mark immediately to prevent duplicates
+    autoSentContainers.add(container);
+
+    // Wait for first content element with enough text
+    const firstElement = await waitForFirstElement(container, 10);
+    if (!firstElement) {
+      debug('⚠️ Live stream: no content element found');
+      return;
+    }
+
+    let lastSentText = extractText(firstElement);
+    if (!lastSentText || lastSentText.length < 5) return;
+
+    // Send initial text
+    debug('📡 Live stream: sending initial text...');
+    const result = await sendToTelegram(lastSentText);
+
+    if (!result.success) {
+      debug('⚠️ Live stream: initial send failed');
+      return;
+    }
+
+    const messageId = Array.isArray(result.messageId) ? result.messageId[0] : result.messageId;
+    debug(`📡 Live stream: started (msgId: ${messageId})`);
+
+    // Show streaming indicator on the element
+    firstElement.style.position = 'relative';
+    const streamingIndicator = document.createElement('span');
+    streamingIndicator.className = 'persephone-sent-indicator persephone-streaming';
+    streamingIndicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+    streamingIndicator.title = 'Streaming to Telegram...';
+    firstElement.appendChild(streamingIndicator);
+
+    let streamFinalized = false;
+
+    // Finalize: final edit, update maps, show buttons
+    const finalize = async () => {
+      if (streamFinalized) return;
+      streamFinalized = true;
+      clearInterval(streamInterval);
+      clearInterval(stopCheckInterval);
+
+      const finalText = extractText(firstElement);
+      if (!finalText || finalText.length < 5) return;
+
+      const sendText = finalText.length > splitThreshold ? splitText(finalText)[0] : finalText;
+
+      // Final edit with proper formatting
+      if (sendText !== lastSentText) {
+        await editInTelegram(messageId, sendText);
+      }
+
+      // Store in maps for edit/delete
       const msgData = {
-        messageId: result.messageId,
+        messageId,
         text: sendText,
         isMultiPart: result.isMultiPart
       };
+      sentMessages.set(firstElement, msgData);
+      sentByHash.set(hashText(sendText), msgData);
 
-      // Store in both maps
-      sentMessages.set(element, msgData);
-      sentByHash.set(hash, msgData);
+      // Remove streaming indicator
+      const indicator = firstElement.querySelector('.persephone-streaming');
+      if (indicator) indicator.remove();
 
-      // Now update UI (non-critical path)
-      if (text.length > 300) {
-        // For split text: replace any chunk-1 button with checkmark, leave chunk-2 button
-        element.style.position = 'relative';
-        const splitBtns = element.querySelectorAll('.persephone-split-btn');
-        splitBtns.forEach(btn => {
-          const badge = btn.querySelector('.persephone-chunk-badge');
-          if (badge && badge.textContent === '1') {
-            const indicator = document.createElement('span');
-            indicator.className = 'persephone-sent-indicator';
-            indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-            indicator.title = 'Part 1 sent';
-            btn.replaceWith(indicator);
-          }
-        });
+      // Add appropriate buttons
+      if (finalText.length > splitThreshold) {
+        const sent1 = document.createElement('span');
+        sent1.className = 'persephone-sent-indicator';
+        sent1.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+        sent1.title = 'Part 1 sent (streamed)';
+        firstElement.appendChild(sent1);
+
+        const [, chunk2] = splitText(finalText);
+        firstElement.appendChild(createSplitSendButton(firstElement, chunk2, 2));
       } else {
-        const btn = element.querySelector('.persephone-inline-btn');
-        if (btn) {
-          replaceWithActionButtons(element, btn);
-        } else {
-          // Button might not exist yet, add the action group directly
-          element.style.position = 'relative';
-          const btnGroup = createActionButtonGroup(element);
-          element.appendChild(btnGroup);
-        }
+        const btnGroup = createActionButtonGroup(firstElement);
+        firstElement.appendChild(btnGroup);
       }
 
-      showToast('✓ Auto-sent first chunk');
-    } else {
-      // Failed - remove from autoSentContainers so it can retry
-      // (but this is rare)
-      debug('⚠️ Auto-send failed, will show send button');
-    }
+      debug('📡 Live stream: finalized');
+      showToast('✓ Streamed first chunk');
+    };
+
+    // Poll and edit every 500ms
+    const streamInterval = setInterval(() => {
+      if (streamFinalized) return;
+
+      const currentText = extractText(firstElement);
+      if (!currentText || currentText === lastSentText) return;
+
+      // For split text, only stream the first half
+      const sendText = currentText.length > splitThreshold ? splitText(currentText)[0] : currentText;
+      if (sendText === lastSentText) return;
+
+      lastSentText = sendText;
+      streamEditTelegram(messageId, sendText);
+    }, 500);
+
+    // Watch for stop conditions (paragraph complete or streaming ended)
+    const stopCheckInterval = setInterval(() => {
+      if (streamFinalized) return;
+      const containerDone = !isElementStreaming(container);
+      const elementDone = !isElementStreaming(firstElement);
+      if (containerDone || elementDone) {
+        finalize();
+      }
+    }, 100);
+
+    // Safety: finalize after 60 seconds no matter what
+    setTimeout(() => finalize(), 60000);
   }
 
   // ============================================
@@ -1112,6 +1192,16 @@
         pointer-events: none;
       }
       
+      /* Live Streaming Indicator */
+      .persephone-streaming {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+        animation: persephonePulse 1s ease-in-out infinite;
+      }
+      @keyframes persephonePulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(0.85); }
+      }
+
       /* Toast */
       .persephone-toast {
         position: fixed;
@@ -1285,10 +1375,11 @@
     if (!isContextValid()) return;
 
     try {
-      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords', 'splitThreshold']);
       extensionEnabled = settings.extensionEnabled !== false; // Default true
       autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
       autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
+      splitThreshold = settings.splitThreshold || 250;
       debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
     } catch (e) {
       debug('Failed to load settings');
@@ -1443,6 +1534,10 @@
       if (request.type === 'SKIP_KEYWORDS_CHANGED') {
         autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
         debug(`📝 Skip keywords updated: ${autoSendSkipKeywords.length} keywords`);
+      }
+      if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
+        splitThreshold = request.splitThreshold || 250;
+        debug(`📝 Split threshold updated: ${splitThreshold}`);
       }
     });
 

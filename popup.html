@@ -12,7 +12,7 @@
       <img src="icons/logo.png" alt="Persephone" class="logo">
       <div class="header-text">
         <h1>Persephone</h1>
-        <p class="subtitle">Grok to Telegram</p>
+        <p class="subtitle">Grok &amp; Claude to Telegram</p>
       </div>
     </header>
 
@@ -61,6 +61,12 @@
       <p class="keywords-hint">Questions containing these words won't auto-send the first chunk. Comma-separated.</p>
       <textarea id="skipKeywords" class="keywords-input" placeholder="short, shorter, brief..." rows="2"></textarea>
       <button id="resetKeywords" class="keywords-reset">Reset to defaults</button>
+    </div>
+
+    <div class="setting-group">
+      <label class="setting-label" for="splitThreshold">Split threshold (chars)</label>
+      <p class="setting-hint">Paragraphs longer than this get two sub-chunk send buttons.</p>
+      <input type="number" id="splitThreshold" class="setting-number" min="50" max="2000" step="10" value="250">
     </div>
 
     <div class="button-group">

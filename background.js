@@ -131,6 +131,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'STREAM_EDIT') {
+    handleStreamEdit(request.messageId, request.text)
+      .then(result => sendResponse(result))
+      .catch(() => sendResponse({ success: false }));
+    return true;
+  }
+
   if (request.type === 'DELETE_MESSAGE') {
     handleDeleteMessage(request.messageId)
       .then(result => sendResponse(result))
@@ -193,6 +200,38 @@ async function handleEditMessage(messageId, newText) {
   }
 
   return editTelegramMessage(settingsCache.botToken, settingsCache.chatId, messageId, newText);
+}
+
+/**
+ * Handle lightweight stream edit - no markdown, ignores "not modified"
+ */
+async function handleStreamEdit(messageId, text) {
+  if (!settingsCache.botToken || !settingsCache.chatId) {
+    return { success: false };
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${settingsCache.botToken}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        chat_id: settingsCache.chatId,
+        message_id: messageId,
+        text: text,
+        disable_web_page_preview: true
+      }),
+    });
+    const data = await response.json();
+
+    if (!data.ok && data.description?.includes('not modified')) {
+      return { success: true };
+    }
+
+    return { success: data.ok };
+  } catch (error) {
+    return { success: false };
+  }
 }
 
 /**

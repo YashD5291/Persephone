@@ -14,8 +14,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const skipKeywordsInput = document.getElementById('skipKeywords');
   const resetKeywordsBtn = document.getElementById('resetKeywords');
   const keywordsSection = document.getElementById('keywordsSection');
+  const splitThresholdInput = document.getElementById('splitThreshold');
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
+  const DEFAULT_SPLIT_THRESHOLD = 250;
+  const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
 
   // Load saved settings
   const settings = await chrome.storage.sync.get([
@@ -24,13 +27,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     'messageCount',
     'extensionEnabled',
     'autoSendFirstChunk',
-    'autoSendSkipKeywords'
+    'autoSendSkipKeywords',
+    'splitThreshold'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
   if (settings.chatId) chatIdInput.value = settings.chatId;
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
   autoSendToggle.checked = settings.autoSendFirstChunk !== false; // Default true
+  splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
   messageCount.textContent = settings.messageCount || 0;
 
   // Load skip keywords
@@ -128,7 +133,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateStatus(botTokenInput.value && chatIdInput.value, extensionEnabled);
 
     // Notify content scripts
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, { type: 'EXTENSION_ENABLED_CHANGED', extensionEnabled });
       });
@@ -142,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateKeywordsVisibility(autoSendFirstChunk);
 
     // Notify content scripts
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk });
       });
@@ -164,7 +169,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await chrome.storage.sync.set({ autoSendSkipKeywords: keywords });
 
     // Notify content scripts
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, { type: 'SKIP_KEYWORDS_CHANGED', keywords });
       });
@@ -180,6 +185,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function updateKeywordsVisibility(autoSendEnabled) {
     keywordsSection.style.display = autoSendEnabled ? 'block' : 'none';
+  }
+
+  // Split threshold: save on change
+  let thresholdSaveTimeout = null;
+  splitThresholdInput.addEventListener('input', () => {
+    clearTimeout(thresholdSaveTimeout);
+    thresholdSaveTimeout = setTimeout(saveSplitThreshold, 600);
+  });
+  splitThresholdInput.addEventListener('blur', saveSplitThreshold);
+
+  async function saveSplitThreshold() {
+    clearTimeout(thresholdSaveTimeout);
+    const val = parseInt(splitThresholdInput.value, 10);
+    const splitThreshold = (val && val >= 50) ? val : DEFAULT_SPLIT_THRESHOLD;
+    splitThresholdInput.value = splitThreshold;
+    await chrome.storage.sync.set({ splitThreshold });
+
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'SPLIT_THRESHOLD_CHANGED', splitThreshold });
+      });
+    });
   }
 
   // Listen for storage changes
@@ -199,6 +226,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (changes.autoSendSkipKeywords !== undefined) {
       const kw = changes.autoSendSkipKeywords.newValue || DEFAULT_SKIP_KEYWORDS;
       skipKeywordsInput.value = kw.join(', ');
+    }
+    if (changes.splitThreshold !== undefined) {
+      splitThresholdInput.value = changes.splitThreshold.newValue || DEFAULT_SPLIT_THRESHOLD;
     }
   });
 });
