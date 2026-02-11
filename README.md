@@ -1,20 +1,32 @@
 # Persephone
 
-A Chrome extension that monitors [grok.com](https://grok.com) and lets you send Grok's responses to Telegram with inline controls.
+A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](https://claude.ai) and lets you send AI responses to Telegram with inline controls.
 
 ## Features
 
+### Live Streaming to Telegram
+- The first paragraph of each new response is **live-streamed** to Telegram word-by-word as it appears on screen
+- Initial text is sent immediately, then the Telegram message is edited every 500ms as more words appear
+- Final edit applies full Markdown formatting once the paragraph is complete
+- Blue pulsing indicator shows which paragraph is actively streaming
+- First chunk is always sent in full regardless of length (no splitting)
+
 ### Auto-Send First Chunk
-- **Enabled by default** - automatically sends the first paragraph/heading when Grok starts responding
+- **Enabled by default** - automatically live-streams the first paragraph/heading when the AI starts responding
 - Toggle in extension popup or press `Cmd/Ctrl+Shift+A` on page
 - Visual indicator shows when auto-send is ON/OFF
-- Get responses in Telegram instantly without clicking
-- **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking Grok to shorten/rewrite — no point auto-sending the first chunk of a rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
+- **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking the AI to shorten/rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
 
 ### Inline Send Buttons
 - **Send button** appears next to each paragraph, list item, code block, and heading
 - Click to send individual chunks to Telegram instantly
 - Buttons appear in real-time as content streams
+
+### Sub-Chunk Splitting
+- Paragraphs longer than the **split threshold** (default 250 chars) get two send buttons (part 1 and part 2)
+- Text is split at the nearest sentence boundary around the midpoint
+- Split threshold is configurable in the extension popup (50-2000 chars)
+- First auto-streamed chunk is exempt from splitting
 
 ### Resend, Edit & Delete
 - After sending, buttons transform into **resend**, **edit**, and **delete**
@@ -30,10 +42,18 @@ A Chrome extension that monitors [grok.com](https://grok.com) and lets you send 
 - Splits long messages automatically (4096 char Telegram limit)
 
 ### Performance Optimizations
-- **API Preconnect**: Establishes connection to Telegram API proactively
+- **API Preconnect**: Establishes connection to Telegram API proactively when streaming starts
 - **Settings Caching**: Credentials cached in memory for instant access
 - **Connection Keep-Alive**: Maintains warm connection to reduce latency
-- **Streaming Detection**: Waits for content to finish before adding buttons (detects `animate-gaussian` class)
+- **Site-aware streaming detection**: Grok (`animate-gaussian` class) and Claude (`data-is-streaming` attribute)
+
+## Supported Sites
+
+| Site | Streaming Detection | Auto-Send | Skip Keywords |
+|------|---------------------|-----------|---------------|
+| [grok.com](https://grok.com) | `animate-gaussian` spans | Yes | Yes |
+| [x.com/i/grok](https://x.com/i/grok) | `animate-gaussian` spans | Yes | Yes |
+| [claude.ai](https://claude.ai) | `data-is-streaming` attribute | Yes | Yes (question detection TBD) |
 
 ## Installation
 
@@ -79,40 +99,58 @@ A Chrome extension that monitors [grok.com](https://grok.com) and lets you send 
 
 ### Detection Strategy
 
-Grok uses a unique streaming approach:
-1. While typing, words are wrapped in `<span class="animate-gaussian">` elements
-2. When a block (paragraph, list, etc.) is complete, these spans are removed
-3. Persephone detects this transition to know when content is ready to capture
+The extension uses site-specific DOM observation to detect when AI responses are streaming and when individual content blocks are complete.
 
+**Grok** uses animated spans during streaming:
 ```
 STREAMING:   <p>Hello <span class="animate-gaussian">world</span></p>
-COMPLETE:    <p>Hello world</p>  ← Ready to capture!
+COMPLETE:    <p>Hello world</p>  <- Ready to capture!
 ```
+
+**Claude** uses a `data-is-streaming` attribute on response containers:
+```
+STREAMING:   <div data-is-streaming="true">
+               <div class="progressive-markdown">
+                 <div><div class="standard-markdown"><p>Hello world</p></div></div>
+               </div>
+             </div>
+
+COMPLETE:    <div data-is-streaming="false">
+               <div><div class="standard-markdown">
+                 <p>Hello world</p>
+                 <p>More text...</p>
+               </div></div>
+             </div>
+```
+
+Claude restructures its DOM when streaming completes - Persephone handles this by tracking text anchors and reading from the rebuilt DOM to capture the complete text.
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  PHASE 1: POLLING (every 1000ms)                                │
-│  - Checks for new response containers                           │
-│  - Scans all responses and adds buttons to complete elements    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  GLOBAL OBSERVER + POLLING (every 200ms)                         │
+│  - Watches for new response containers (site-aware selectors)    │
+│  - Scans all responses and adds buttons to complete elements     │
+└──────────────────────────────────────────────────────────────────┘
                               │
-                              ▼ New streaming response detected
-┌─────────────────────────────────────────────────────────────────┐
-│  PHASE 2: MUTATION OBSERVER (reactive)                          │
-│  - Watches only the streaming response container                │
-│  - Processes elements as they complete (no animate-gaussian)    │
-│  - Adds inline send buttons immediately                         │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ Streaming complete
-┌─────────────────────────────────────────────────────────────────┐
-│  PHASE 3: COMPLETION                                            │
-│  - Final processing pass                                        │
-│  - Disconnect observer                                          │
-│  - Return to polling mode                                       │
-└─────────────────────────────────────────────────────────────────┘
+                              v New streaming response detected
+┌──────────────────────────────────────────────────────────────────┐
+│  STREAMING OBSERVER (per-container MutationObserver)              │
+│  - Watches childList, subtree, characterData changes             │
+│  - Claude: also watches data-is-streaming attribute              │
+│  - Processes elements as they complete                           │
+│  - Adds inline send buttons immediately                          │
+└──────────────────────────────────────────────────────────────────┘
+          │                                        │
+          v Auto-send enabled                      v Manual send
+┌──────────────────────────┐    ┌──────────────────────────────────┐
+│  LIVE STREAM              │    │  BUTTON CLICK                    │
+│  - sendMessage (initial)  │    │  - sendMessage (full text)       │
+│  - editMessageText @500ms │    │  - Replace with action buttons   │
+│  - Final edit w/ markdown │    └──────────────────────────────────┘
+│  - Track via text anchor  │
+└──────────────────────────┘
 ```
 
 ## Project Structure
@@ -123,7 +161,7 @@ Persephone/
 ├── popup.html         # Settings popup UI
 ├── popup.css          # Popup styling
 ├── popup.js           # Popup logic
-├── content.js         # DOM monitor & inline buttons
+├── content.js         # DOM monitor & inline buttons (site-aware)
 ├── background.js      # Telegram API handler
 ├── .gitignore         # Git ignore file
 └── icons/
@@ -138,8 +176,9 @@ Persephone/
 | State | Appearance | Actions |
 |-------|------------|---------|
 | Ready | White send icon | Click to send |
-| Sent | Green checkmark + white resend + gray edit + red delete | Resend, edit, or delete |
-| Streaming | No button (waiting) | Content still loading |
+| Ready (split) | Two send icons with 1/2 badges | Click to send each half |
+| Streaming | Blue pulsing indicator | Live-streaming to Telegram |
+| Sent | Green checkmark + resend + edit + delete | Resend, edit, or delete |
 
 ## Telegram Formatting
 
@@ -166,15 +205,29 @@ Content is converted to Telegram Markdown:
 - `Ctrl/Cmd + Enter` - Save changes
 - `Escape` - Cancel and close
 
+## Popup Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Bot Token | — | Telegram bot token from @BotFather |
+| Chat ID | — | Telegram chat/user ID |
+| Enable Extension | ON | Master toggle (also via Cmd/Ctrl+Shift+E) |
+| Auto-send first chunk | ON | Live-stream first paragraph to Telegram |
+| Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
+| Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
+
 ## Troubleshooting
 
 **"Extension disconnected" error:**
 - The page was open too long. Refresh the page.
 
 **Buttons not appearing:**
-- Wait for Grok to finish streaming (buttons appear after content stabilizes)
-- Make sure you're on grok.com
+- Wait for the AI to finish streaming (buttons appear after content stabilizes)
+- Make sure you're on grok.com or claude.ai
 - Check the browser console for errors (F12 → Console)
+
+**Live stream missing last words:**
+- This can happen when Claude restructures its DOM after streaming completes. The extension reads from the rebuilt DOM to capture the full text. If it persists, the final edit should contain the complete paragraph.
 
 **Edit not working:**
 - Multi-part messages (split due to length) cannot be edited
@@ -193,11 +246,12 @@ Content is converted to Telegram Markdown:
 
 - Your Bot Token and Chat ID are stored locally in Chrome's sync storage
 - Messages are sent directly to Telegram's API (no intermediary servers)
-- The extension only runs on grok.com domains
+- The extension only runs on grok.com, x.com/i/grok, and claude.ai domains
 - No data is collected or transmitted elsewhere
 
 ## Version History
 
+- **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling
 - **v3.6** - Skip keywords for auto-send (configurable via popup, skips auto-send when question contains keywords like "shorter")
 - **v3.5** - Master toggle to enable/disable extension, keyboard shortcuts (Cmd/Ctrl+Shift+E/A)
 - **v3.4** - Auto-send first chunk (enabled by default), resend button, individual list item buttons
