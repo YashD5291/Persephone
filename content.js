@@ -150,6 +150,49 @@
     return rows.join('\n');
   }
 
+  /**
+   * Split long text at ~halfway on a sentence boundary, falling back to comma, then space.
+   * Returns [firstHalf, secondHalf].
+   */
+  function splitText(text) {
+    const mid = Math.floor(text.length / 2);
+    const searchRange = Math.floor(text.length * 0.2); // Look within 20% of midpoint
+
+    // Try splitting on sentence boundary (". ")
+    let bestIdx = -1;
+    for (let i = mid - searchRange; i <= mid + searchRange; i++) {
+      if (i > 0 && i < text.length - 1 && text[i] === '.' && text[i + 1] === ' ') {
+        if (bestIdx === -1 || Math.abs(i - mid) < Math.abs(bestIdx - mid)) {
+          bestIdx = i + 1; // Include the period in the first half
+        }
+      }
+    }
+    if (bestIdx > 0) return [text.substring(0, bestIdx).trim(), text.substring(bestIdx).trim()];
+
+    // Fall back to comma
+    for (let i = mid - searchRange; i <= mid + searchRange; i++) {
+      if (i > 0 && i < text.length - 1 && text[i] === ',' && text[i + 1] === ' ') {
+        if (bestIdx === -1 || Math.abs(i - mid) < Math.abs(bestIdx - mid)) {
+          bestIdx = i + 1; // Include the comma in the first half
+        }
+      }
+    }
+    if (bestIdx > 0) return [text.substring(0, bestIdx).trim(), text.substring(bestIdx).trim()];
+
+    // Fall back to nearest space
+    for (let i = mid - searchRange; i <= mid + searchRange; i++) {
+      if (i > 0 && i < text.length && text[i] === ' ') {
+        if (bestIdx === -1 || Math.abs(i - mid) < Math.abs(bestIdx - mid)) {
+          bestIdx = i;
+        }
+      }
+    }
+    if (bestIdx > 0) return [text.substring(0, bestIdx).trim(), text.substring(bestIdx).trim()];
+
+    // Last resort: hard split at midpoint
+    return [text.substring(0, mid).trim(), text.substring(mid).trim()];
+  }
+
   // ============================================
   // BUTTON INJECTION
   // ============================================
@@ -186,6 +229,53 @@
         replaceWithActionButtons(element, btn);
       } else {
         btn.style.opacity = '0.8';
+        btn.style.pointerEvents = 'auto';
+      }
+    });
+
+    return btn;
+  }
+
+  /**
+   * Create a send button for a sub-chunk with a chunk indicator badge.
+   * @param {Element} element - The DOM element this button belongs to
+   * @param {string} chunkText - The text this button will send
+   * @param {number} chunkNum - 1 or 2
+   */
+  function createSplitSendButton(element, chunkText, chunkNum) {
+    const btn = document.createElement('button');
+    btn.className = 'persephone-inline-btn persephone-send-btn persephone-split-btn';
+    btn.title = `Send part ${chunkNum} to Telegram`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg><span class="persephone-chunk-badge">${chunkNum}</span>`;
+
+    const textHash = hashText(chunkText);
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      btn.style.opacity = '0.5';
+      btn.style.pointerEvents = 'none';
+
+      const result = await sendToTelegram(chunkText);
+
+      if (result.success) {
+        const msgData = {
+          messageId: result.messageId,
+          text: chunkText,
+          isMultiPart: result.isMultiPart
+        };
+
+        sentByHash.set(textHash, msgData);
+
+        // Replace this button with a checkmark
+        const sentIndicator = document.createElement('span');
+        sentIndicator.className = 'persephone-sent-indicator';
+        sentIndicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+        sentIndicator.title = `Part ${chunkNum} sent`;
+        btn.replaceWith(sentIndicator);
+      } else {
+        btn.style.opacity = '0.85';
         btn.style.pointerEvents = 'auto';
       }
     });
@@ -303,7 +393,8 @@
     // Skip if this element already has its own button (direct child)
     const hasOwnButton = Array.from(element.children).some(
       child => child.classList.contains('persephone-inline-btn') ||
-               child.classList.contains('persephone-btn-group')
+               child.classList.contains('persephone-btn-group') ||
+               child.classList.contains('persephone-sent-indicator')
     );
     if (hasOwnButton) return false;
 
@@ -316,6 +407,44 @@
 
     const hash = hashText(text);
     element.style.position = 'relative';
+
+    // Long paragraph: split into two sub-chunks
+    if (text.length > 300) {
+      const [chunk1, chunk2] = splitText(text);
+      const hash1 = hashText(chunk1);
+      const hash2 = hashText(chunk2);
+
+      // Check if chunks were already sent (restore path)
+      const sent1 = sentByHash.has(hash1);
+      const sent2 = sentByHash.has(hash2);
+
+      if (sent1) {
+        const indicator = document.createElement('span');
+        indicator.className = 'persephone-sent-indicator';
+        indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+        indicator.title = 'Part 1 sent';
+        element.appendChild(indicator);
+      } else {
+        element.appendChild(createSplitSendButton(element, chunk1, 1));
+      }
+
+      if (sent2) {
+        const indicator = document.createElement('span');
+        indicator.className = 'persephone-sent-indicator';
+        indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+        indicator.title = 'Part 2 sent';
+        element.appendChild(indicator);
+      } else {
+        element.appendChild(createSplitSendButton(element, chunk2, 2));
+      }
+
+      if (!seenTexts.has(hash)) {
+        seenTexts.add(hash);
+        debug(`✅ <${element.tagName.toLowerCase()}> (split): ${text.substring(0, 50)}...`);
+      }
+
+      return true;
+    }
 
     // Check if this text was already sent (container replacement scenario)
     if (sentByHash.has(hash)) {
@@ -537,15 +666,17 @@
    * Fire and send - optimized for speed, UI updates happen after
    */
   async function fireAndSend(element, text) {
-    const hash = hashText(text);
+    // For long paragraphs, only auto-send the first half
+    const sendText = text.length > 300 ? splitText(text)[0] : text;
+    const hash = hashText(sendText);
 
     // Send immediately - this is the critical path
-    const result = await sendToTelegram(text);
+    const result = await sendToTelegram(sendText);
 
     if (result.success) {
       const msgData = {
         messageId: result.messageId,
-        text: text,
+        text: sendText,
         isMultiPart: result.isMultiPart
       };
 
@@ -554,14 +685,30 @@
       sentByHash.set(hash, msgData);
 
       // Now update UI (non-critical path)
-      const btn = element.querySelector('.persephone-inline-btn');
-      if (btn) {
-        replaceWithActionButtons(element, btn);
-      } else {
-        // Button might not exist yet, add the action group directly
+      if (text.length > 300) {
+        // For split text: replace any chunk-1 button with checkmark, leave chunk-2 button
         element.style.position = 'relative';
-        const btnGroup = createActionButtonGroup(element);
-        element.appendChild(btnGroup);
+        const splitBtns = element.querySelectorAll('.persephone-split-btn');
+        splitBtns.forEach(btn => {
+          const badge = btn.querySelector('.persephone-chunk-badge');
+          if (badge && badge.textContent === '1') {
+            const indicator = document.createElement('span');
+            indicator.className = 'persephone-sent-indicator';
+            indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+            indicator.title = 'Part 1 sent';
+            btn.replaceWith(indicator);
+          }
+        });
+      } else {
+        const btn = element.querySelector('.persephone-inline-btn');
+        if (btn) {
+          replaceWithActionButtons(element, btn);
+        } else {
+          // Button might not exist yet, add the action group directly
+          element.style.position = 'relative';
+          const btnGroup = createActionButtonGroup(element);
+          element.appendChild(btnGroup);
+        }
       }
 
       showToast('✓ Auto-sent first chunk');
@@ -905,6 +1052,29 @@
       }
       .persephone-delete-btn svg {
         fill: #fff;
+      }
+
+      /* Split Send Button */
+      .persephone-split-btn {
+        position: relative;
+      }
+      .persephone-chunk-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #1a1a1a;
+        color: #fff;
+        font-size: 8px;
+        font-weight: 700;
+        font-family: system-ui, sans-serif;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        pointer-events: none;
       }
       
       /* Toast */
