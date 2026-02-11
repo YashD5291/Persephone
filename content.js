@@ -22,7 +22,7 @@
   const SITE = window.location.hostname.includes('claude.ai') ? 'claude' : 'grok';
 
   const SELECTORS = SITE === 'claude' ? {
-    responseContainer: 'div[data-is-streaming] .standard-markdown, div[data-is-streaming] .progressive-markdown',
+    responseContainer: 'div[data-is-streaming]',
     userQuestion: null,
     cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
   } : {
@@ -49,8 +49,15 @@
 
   function isElementStreaming(element) {
     if (SITE === 'claude') {
-      const streamingAncestor = element.closest('[data-is-streaming]');
-      return streamingAncestor?.getAttribute('data-is-streaming') === 'true';
+      // Container-level: element IS the div[data-is-streaming]
+      if (element.hasAttribute('data-is-streaming')) {
+        return element.getAttribute('data-is-streaming') === 'true';
+      }
+      // Element-level: only the last content element in a streaming response is "still streaming"
+      const streamingAncestor = element.closest('[data-is-streaming="true"]');
+      if (!streamingAncestor) return false;
+      const allContent = streamingAncestor.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li');
+      return allContent.length > 0 && allContent[allContent.length - 1] === element;
     }
     return element.querySelector('.animate-gaussian') !== null;
   }
@@ -659,11 +666,17 @@
       }
     });
 
-    observer.observe(container, {
+    const observerOptions = {
       childList: true,
       subtree: true,
       characterData: true
-    });
+    };
+    // For Claude, also watch the data-is-streaming attribute to detect streaming end
+    if (SITE === 'claude') {
+      observerOptions.attributes = true;
+      observerOptions.attributeFilter = ['data-is-streaming'];
+    }
+    observer.observe(container, observerOptions);
 
     // Try auto-send IMMEDIATELY
     tryAutoSend();
