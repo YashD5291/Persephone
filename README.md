@@ -1,6 +1,6 @@
 # Persephone
 
-A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](https://claude.ai) and lets you send AI responses to Telegram with inline controls.
+A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](https://claude.ai) and lets you send AI responses to Telegram with inline controls. Also supports voice-to-chat via MacWhisper integration.
 
 ## Features
 
@@ -41,6 +41,14 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Handles code blocks with language detection
 - Splits long messages automatically (4096 char Telegram limit)
 
+### MacWhisper Voice Input
+- **Floating mic button** on Grok/Claude pages — click to start/stop MacWhisper transcription
+- Uses Chrome Native Messaging to trigger MacWhisper's F5 shortcut via a local Python host
+- MacWhisper transcribes speech and types directly into the focused chat input
+- **Auto-submit**: optionally submits the transcribed text immediately when recording stops (ideal for meetings)
+- Keyboard shortcut: `Alt+M` to toggle recording
+- Mic button turns red and pulses while recording
+
 ### Performance Optimizations
 - **API Preconnect**: Establishes connection to Telegram API proactively when streaming starts
 - **Settings Caching**: Credentials cached in memory for instant access
@@ -67,6 +75,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 3. **Load the extension:**
    - Click "Load unpacked"
    - Select the `Persephone` folder
+   - Note the **Extension ID** shown on the card (you'll need it for step 5)
 
 4. **Configure Telegram:**
    - Click the Persephone icon in your toolbar
@@ -74,6 +83,18 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
    - Enter your **Chat ID** (your user ID or group chat ID)
    - Click "Save Settings"
    - Use "Test Connection" to verify it works
+
+5. **Set up MacWhisper voice input (optional):**
+   - Requires [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper) with F5 as the record shortcut
+   - Run the install script:
+     ```bash
+     cd native-host
+     chmod +x install.sh
+     ./install.sh
+     ```
+   - Enter your Extension ID when prompted
+   - Restart Chrome
+   - A floating mic button will appear on Grok/Claude pages
 
 ## Getting Telegram Credentials
 
@@ -151,6 +172,15 @@ Claude restructures its DOM when streaming completes - Persephone handles this b
 │  - Final edit w/ markdown │    └──────────────────────────────────┘
 │  - Track via text anchor  │
 └──────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│  VOICE INPUT (MacWhisper via Native Messaging)                    │
+│  - Mic button click → focus chat input → TOGGLE_WHISPER           │
+│  - background.js → sendNativeMessage → persephone_host.py         │
+│  - Python host simulates F5 keypress via osascript                │
+│  - MacWhisper transcribes and types into focused input            │
+│  - Stop recording → poll input for text → auto-submit (optional)  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -161,14 +191,18 @@ Persephone/
 ├── popup.html         # Settings popup UI
 ├── popup.css          # Popup styling
 ├── popup.js           # Popup logic
-├── content.js         # DOM monitor & inline buttons (site-aware)
-├── background.js      # Telegram API handler
+├── content.js         # DOM monitor, inline buttons, voice input (site-aware)
+├── background.js      # Telegram API handler, native messaging bridge
 ├── .gitignore         # Git ignore file
-└── icons/
-    ├── icon16.png
-    ├── icon48.png
-    ├── icon128.png
-    └── logo.png       # Popup header logo
+├── icons/
+│   ├── icon16.png
+│   ├── icon48.png
+│   ├── icon128.png
+│   └── logo.png       # Popup header logo
+└── native-host/
+    ├── persephone_host.py      # Native messaging host (Python)
+    ├── com.persephone.host.json # Native messaging manifest template
+    └── install.sh               # One-time setup script
 ```
 
 ## Button States
@@ -200,6 +234,7 @@ Content is converted to Telegram Markdown:
 ### On Page
 - `Cmd + Shift + E` (Mac) / `Ctrl + Shift + E` (Windows/Linux) - Toggle extension ON/OFF
 - `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send first chunk ON/OFF
+- `Alt + M` - Toggle MacWhisper recording (start/stop)
 
 ### Edit Modal
 - `Ctrl/Cmd + Enter` - Save changes
@@ -213,6 +248,7 @@ Content is converted to Telegram Markdown:
 | Chat ID | — | Telegram chat/user ID |
 | Enable Extension | ON | Master toggle (also via Cmd/Ctrl+Shift+E) |
 | Auto-send first chunk | ON | Live-stream first paragraph to Telegram |
+| Auto-submit voice input | OFF | Automatically submit transcribed text when recording stops |
 | Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
 | Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
 
@@ -237,6 +273,16 @@ Content is converted to Telegram Markdown:
 - Telegram only allows deleting messages for 48 hours
 - Bot must have delete permissions in group chats
 
+**Mic button not appearing:**
+- Make sure the native messaging host is installed (`native-host/install.sh`)
+- Verify the extension ID in the manifest matches your actual extension ID
+- Restart Chrome after installing the native host
+
+**Voice auto-submit not working:**
+- Enable "Auto-submit voice input" in the extension popup
+- Make sure the chat input is focused before starting recording (the mic button does this automatically)
+- If you switched tabs during recording, click the chat input area before stopping
+
 **Test connection fails:**
 - Verify your bot token is correct
 - Make sure you've messaged the bot at least once
@@ -251,6 +297,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v4.1** - MacWhisper voice input via native messaging, floating mic button, auto-submit, Alt+M shortcut
 - **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling
 - **v3.6** - Skip keywords for auto-send (configurable via popup, skips auto-send when question contains keywords like "shorter")
 - **v3.5** - Master toggle to enable/disable extension, keyboard shortcuts (Cmd/Ctrl+Shift+E/A)
