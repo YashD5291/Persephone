@@ -5,7 +5,8 @@
   "description": "Automatically sends Grok and Claude responses to Telegram",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://api.telegram.org/*"

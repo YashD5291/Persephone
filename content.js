@@ -13,6 +13,7 @@
   let extensionEnabled = true; // Master toggle - enabled by default
   let autoSendFirstChunk = true; // Enabled by default
   let splitThreshold = 250; // Character count above which paragraphs get split send buttons
+  let autoSubmitVoice = false; // Auto-submit transcribed voice input
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
@@ -26,10 +27,14 @@
     responseContainer: 'div[data-is-streaming]',
     userQuestion: null,
     cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
+    chatInput: 'div.ProseMirror[data-testid="chat-input"]',
+    sendButton: 'button[aria-label="Send message"]',
   } : {
     responseContainer: '.items-start .response-content-markdown',
     userQuestion: '[class*="items-end"] .message-bubble',
     cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator, .animate-gaussian, .citation',
+    chatInput: '.query-bar div.tiptap.ProseMirror[contenteditable="true"]',
+    sendButton: 'button[aria-label="Submit"]',
   };
 
   function debug(...args) {
@@ -1220,6 +1225,45 @@
         50% { opacity: 0.5; transform: scale(0.85); }
       }
 
+      /* Floating Mic Button */
+      .persephone-mic-btn {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: none;
+        background: #525252;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        z-index: 9999998;
+        transition: background 0.2s, transform 0.15s;
+      }
+      .persephone-mic-btn:hover {
+        background: #3f3f3f;
+        transform: scale(1.08);
+      }
+      .persephone-mic-btn:active {
+        transform: scale(0.95);
+      }
+      .persephone-mic-btn svg {
+        width: 22px;
+        height: 22px;
+      }
+      .persephone-mic-btn.recording {
+        background: #dc2626;
+        animation: persephoneMicPulse 1s ease-in-out infinite;
+      }
+      @keyframes persephoneMicPulse {
+        0%, 100% { box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4); transform: scale(1); }
+        50% { box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7); transform: scale(1.06); }
+      }
+
       /* Toast */
       .persephone-toast {
         position: fixed;
@@ -1393,11 +1437,12 @@
     if (!isContextValid()) return;
 
     try {
-      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords', 'splitThreshold']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords', 'splitThreshold', 'autoSubmitVoice']);
       extensionEnabled = settings.extensionEnabled !== false; // Default true
       autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
       autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
       splitThreshold = settings.splitThreshold || 250;
+      autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
       debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
     } catch (e) {
       debug('Failed to load settings');
@@ -1504,13 +1549,218 @@
   }
 
   // ============================================
+  // VOICE INPUT (MacWhisper)
+  // ============================================
+
+  let micRecording = false;
+
+  /**
+   * Find the chat input element, trying the primary selector then fallbacks.
+   */
+  function findChatInput() {
+    let el = document.querySelector(SELECTORS.chatInput);
+    if (el) return el;
+    // Fallback: any ProseMirror contenteditable (both sites use tiptap/ProseMirror)
+    el = document.querySelector('div.ProseMirror[contenteditable="true"]');
+    if (el) return el;
+    el = document.querySelector('[contenteditable="true"]');
+    return el;
+  }
+
+  /**
+   * Try to click the send/submit button. Retries up to maxAttempts
+   * since the button may appear after text enters the input.
+   */
+  function submitChatInput() {
+    const input = findChatInput();
+
+    // 1. Try the send/submit button if visible and enabled
+    const sendBtn = document.querySelector(SELECTORS.sendButton);
+    if (sendBtn && !sendBtn.disabled && sendBtn.offsetParent !== null) {
+      sendBtn.click();
+      debug('🎙️ Submit: clicked send button');
+      showToast('Voice message sent');
+      return;
+    }
+
+    // 2. Force-click the button even if hidden/disabled (tab-switch scenario:
+    //    framework state is stale but clicking may still trigger the handler)
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.click();
+      debug('🎙️ Submit: force-clicked send button');
+      showToast('Voice message sent');
+      return;
+    }
+
+    // 3. Try form.requestSubmit() (Grok wraps input in a <form>)
+    if (input) {
+      const form = input.closest('form');
+      if (form) {
+        try {
+          form.requestSubmit();
+          debug('🎙️ Submit: form.requestSubmit()');
+          showToast('Voice message sent');
+          return;
+        } catch (e) {
+          debug('🎙️ Submit: requestSubmit failed:', e.message);
+        }
+      }
+    }
+
+    // 4. Enter key on the input
+    if (input) {
+      const props = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+      input.dispatchEvent(new KeyboardEvent('keydown', props));
+      input.dispatchEvent(new KeyboardEvent('keypress', props));
+      input.dispatchEvent(new KeyboardEvent('keyup', props));
+      debug('🎙️ Submit: dispatched Enter key sequence');
+      showToast('Voice message sent');
+    } else {
+      debug('🎙️ Submit: failed — no input or button found');
+    }
+  }
+
+  /**
+   * Get the current text value from a chat input element.
+   */
+  function getInputValue(input) {
+    if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+      return input.value;
+    }
+    return input.textContent || input.innerText || '';
+  }
+
+  /**
+   * Poll the chat input for new text from MacWhisper.
+   * Polls every 200ms. When text changes and stabilizes for 800ms, fires callback.
+   * Uses polling instead of event listeners because MacWhisper's simulated
+   * keystrokes may not trigger DOM input events or mutations.
+   */
+  function watchForTranscription(inputBefore) {
+    if (!findChatInput()) {
+      debug('🎙️ Cannot watch — chat input not found');
+      return;
+    }
+
+    const POLL_MS = 50;
+    debug('🎙️ Watching input for transcription (polling)...');
+
+    const pollInterval = setInterval(() => {
+      // Re-find input each poll (DOM may rebuild after tab switch)
+      const input = findChatInput();
+      if (!input) return;
+
+      const current = getInputValue(input).trim();
+
+      if (current.length > 0 && current !== inputBefore) {
+        // New text detected — fire immediately
+        clearInterval(pollInterval);
+        const transcription = inputBefore ? current.replace(inputBefore, '').trim() : current;
+        console.log('[Persephone] TRANSCRIPTION:', transcription);
+        debug('🎙️ Transcription:', transcription);
+
+        if (autoSubmitVoice) {
+          // Focus input and poke the framework before submitting
+          input.focus();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          submitChatInput();
+        }
+      }
+    }, POLL_MS);
+
+    // Safety: stop polling after 30 seconds
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      const input = findChatInput();
+      if (input) {
+        const final = getInputValue(input).trim();
+        if (final && final !== inputBefore) {
+          console.log('[Persephone] TRANSCRIPTION (timeout):', final);
+          debug('🎙️ Transcription (timeout):', final);
+        }
+      }
+    }, 30000);
+  }
+
+  /**
+   * Handle mic button click — toggle MacWhisper recording.
+   */
+  async function handleMicClick() {
+    if (!isContextValid()) {
+      showToast('Extension disconnected. Please refresh.');
+      return;
+    }
+
+    const micBtn = document.querySelector('.persephone-mic-btn');
+    if (!micBtn) return;
+
+    // Always keep focus on the chat input, not the button
+    const input = findChatInput();
+    if (input) input.focus();
+
+    if (!micRecording) {
+      // Starting recording
+      const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER' });
+      if (result?.success) {
+        micRecording = true;
+        micBtn.classList.add('recording');
+        if (input) input.focus();
+        debug('🎙️ Recording started');
+      } else {
+        showToast('Failed to start MacWhisper');
+        debug('🎙️ Start failed:', result?.error);
+      }
+    } else {
+      // Stopping recording — capture what's in the input before MacWhisper types
+      const inputBefore = input ? getInputValue(input).trim() : '';
+
+      // refocus: true tells the native host to re-activate Chrome after F5
+      const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER', refocus: true });
+      micRecording = false;
+      micBtn.classList.remove('recording');
+
+      // Re-focus input so MacWhisper types into it
+      if (input) input.focus();
+      debug('🎙️ Recording stopped, input focused, polling for transcription...');
+
+      // Poll the input for MacWhisper's typing
+      watchForTranscription(inputBefore);
+    }
+  }
+
+  /**
+   * Inject the floating mic button into the page.
+   * Uses mousedown preventDefault to avoid stealing focus from chat input.
+   */
+  function injectMicButton() {
+    if (document.querySelector('.persephone-mic-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'persephone-mic-btn';
+    btn.title = 'Toggle MacWhisper (Alt+M)';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+
+    // Prevent mousedown from stealing focus away from chat input
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
+    btn.addEventListener('click', handleMicClick);
+
+    document.body.appendChild(btn);
+    debug('🎙️ Mic button injected');
+  }
+
+  // ============================================
   // INIT
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.5 (with master toggle)');
+    debug('🚀 Persephone v3.6 (with voice input)');
 
     injectStyles();
+    injectMicButton();
 
     // Load settings
     loadSettings();
@@ -1520,6 +1770,11 @@
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+      // Alt/Option+M - Toggle MacWhisper mic
+      if (e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        handleMicClick();
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
         // Cmd/Ctrl+Shift+E - Toggle extension
         if (e.key.toLowerCase() === 'e') {
@@ -1556,6 +1811,10 @@
       if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
         splitThreshold = request.splitThreshold || 250;
         debug(`📝 Split threshold updated: ${splitThreshold}`);
+      }
+      if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
+        autoSubmitVoice = request.autoSubmitVoice === true;
+        debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
       }
     });
 

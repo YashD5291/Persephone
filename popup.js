@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const resetKeywordsBtn = document.getElementById('resetKeywords');
   const keywordsSection = document.getElementById('keywordsSection');
   const splitThresholdInput = document.getElementById('splitThreshold');
+  const autoSubmitVoiceToggle = document.getElementById('autoSubmitVoiceToggle');
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   const DEFAULT_SPLIT_THRESHOLD = 250;
@@ -28,7 +29,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'extensionEnabled',
     'autoSendFirstChunk',
     'autoSendSkipKeywords',
-    'splitThreshold'
+    'splitThreshold',
+    'autoSubmitVoice'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
@@ -36,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
   autoSendToggle.checked = settings.autoSendFirstChunk !== false; // Default true
   splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
+  autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
   messageCount.textContent = settings.messageCount || 0;
 
   // Load skip keywords
@@ -154,6 +157,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // Auto-submit voice toggle change
+  autoSubmitVoiceToggle.addEventListener('change', async () => {
+    const autoSubmitVoice = autoSubmitVoiceToggle.checked;
+    await chrome.storage.sync.set({ autoSubmitVoice });
+
+    // Notify content scripts
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SUBMIT_VOICE_CHANGED', autoSubmitVoice });
+      });
+    });
+  });
+
   // Keywords: save on blur (when user finishes editing)
   let keywordsSaveTimeout = null;
   skipKeywordsInput.addEventListener('input', () => {
@@ -229,6 +245,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.splitThreshold !== undefined) {
       splitThresholdInput.value = changes.splitThreshold.newValue || DEFAULT_SPLIT_THRESHOLD;
+    }
+    if (changes.autoSubmitVoice !== undefined) {
+      autoSubmitVoiceToggle.checked = changes.autoSubmitVoice.newValue === true;
     }
   });
 });

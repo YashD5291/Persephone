@@ -1,0 +1,7 @@
+{
+  "name": "com.persephone.host",
+  "description": "Persephone native messaging host for MacWhisper integration",
+  "path": "/ABSOLUTE/PATH/persephone_host.py",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://EXTENSION_ID/"]
+}

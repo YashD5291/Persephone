@@ -97,6 +97,36 @@ function startConnectionKeepAlive() {
 }
 
 // ============================================
+// NATIVE MESSAGING (MacWhisper)
+// ============================================
+
+/**
+ * Toggle MacWhisper recording via native messaging host
+ */
+async function toggleWhisper(refocus = false) {
+  try {
+    const response = await chrome.runtime.sendNativeMessage('com.persephone.host', { action: 'toggle', refocus });
+    return { success: response?.success ?? false };
+  } catch (error) {
+    console.error('[Persephone] Native messaging error:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Read clipboard contents via native messaging host
+ */
+async function getClipboard() {
+  try {
+    const response = await chrome.runtime.sendNativeMessage('com.persephone.host', { action: 'get_clipboard' });
+    return { success: response?.success ?? false, text: response?.text ?? '' };
+  } catch (error) {
+    console.error('[Persephone] Clipboard read error:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
 // MESSAGE HANDLERS
 // ============================================
 
@@ -140,6 +170,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.type === 'DELETE_MESSAGE') {
     handleDeleteMessage(request.messageId)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.type === 'TOGGLE_WHISPER') {
+    toggleWhisper(request.refocus || false)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.type === 'GET_CLIPBOARD') {
+    getClipboard()
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
