@@ -1425,6 +1425,159 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
+
+      /* Floating Gear Button */
+      .persephone-gear-btn {
+        position: fixed;
+        bottom: 80px;
+        right: 28px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: #525252;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        z-index: 9999998;
+        transition: background 0.2s, transform 0.15s;
+      }
+      .persephone-gear-btn:hover {
+        background: #3f3f3f;
+        transform: scale(1.08);
+      }
+      .persephone-gear-btn:active {
+        transform: scale(0.95);
+      }
+      .persephone-gear-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      /* Settings Panel */
+      .persephone-settings-panel {
+        position: fixed;
+        bottom: 136px;
+        right: 24px;
+        width: 260px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+        z-index: 9999998;
+        font-family: system-ui, -apple-system, sans-serif;
+        animation: persephonePanelIn 0.2s ease;
+        overflow: hidden;
+      }
+      .persephone-settings-panel.hidden {
+        display: none;
+      }
+      @keyframes persephonePanelIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* Panel Header */
+      .persephone-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid #eee;
+        font-weight: 600;
+        font-size: 14px;
+        color: #1a1a1a;
+      }
+      .persephone-panel-close {
+        background: none;
+        border: none;
+        color: #999;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        transition: color 0.2s;
+      }
+      .persephone-panel-close:hover {
+        color: #1a1a1a;
+      }
+
+      /* Panel Rows */
+      .persephone-panel-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .persephone-panel-row:last-child {
+        border-bottom: none;
+      }
+      .persephone-panel-label {
+        font-size: 13px;
+        color: #1a1a1a;
+        user-select: none;
+      }
+
+      /* Toggle Switch */
+      .persephone-panel-toggle {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+      .persephone-panel-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+        position: absolute;
+      }
+      .persephone-panel-toggle .persephone-toggle-track {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: #ccc;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .persephone-panel-toggle .persephone-toggle-track::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      }
+      .persephone-panel-toggle input:checked + .persephone-toggle-track {
+        background: #1a1a1a;
+      }
+      .persephone-panel-toggle input:checked + .persephone-toggle-track::after {
+        transform: translateX(16px);
+      }
+
+      /* Number Input */
+      .persephone-panel-input {
+        width: 60px;
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: system-ui, sans-serif;
+        color: #1a1a1a;
+        text-align: center;
+        background: #fafafa;
+        flex-shrink: 0;
+      }
+      .persephone-panel-input:focus {
+        outline: none;
+        border-color: #1a1a1a;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -1820,14 +1973,182 @@
   }
 
   // ============================================
+  // FLOATING SETTINGS WIDGET
+  // ============================================
+
+  /**
+   * Update all widget toggle/input states to match current local variables.
+   * Called when settings change externally (popup, keyboard shortcut, storage).
+   */
+  function updateWidgetStates() {
+    const panel = document.querySelector('.persephone-settings-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+
+    const extToggle = panel.querySelector('[data-key="extensionEnabled"]');
+    if (extToggle) extToggle.checked = extensionEnabled;
+
+    const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
+    const autoToggle = panel.querySelector(`[data-key="${autoSendKey}"]`);
+    if (autoToggle) autoToggle.checked = autoSendFirstChunk;
+
+    const voiceToggle = panel.querySelector('[data-key="autoSubmitVoice"]');
+    if (voiceToggle) voiceToggle.checked = autoSubmitVoice;
+
+    const thresholdInput = panel.querySelector('[data-key="splitThreshold"]');
+    if (thresholdInput && document.activeElement !== thresholdInput) {
+      thresholdInput.value = splitThreshold;
+    }
+  }
+
+  function injectSettingsWidget() {
+    if (document.querySelector('.persephone-gear-btn')) return;
+
+    // --- Gear button ---
+    const gearBtn = document.createElement('button');
+    gearBtn.className = 'persephone-gear-btn';
+    gearBtn.title = 'Persephone Settings';
+    gearBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z"/></svg>`;
+
+    // --- Panel ---
+    const panel = document.createElement('div');
+    panel.className = 'persephone-settings-panel hidden';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'persephone-panel-header';
+    const title = document.createElement('span');
+    title.textContent = 'Persephone';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'persephone-panel-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    // Toggle rows
+    const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
+    const rows = [
+      { label: 'Extension', key: 'extensionEnabled', get: () => extensionEnabled },
+      { label: `Auto-send (${SITE === 'claude' ? 'Claude' : 'Grok'})`, key: autoSendKey, get: () => autoSendFirstChunk },
+      { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => autoSubmitVoice },
+    ];
+
+    rows.forEach(({ label, key, get }) => {
+      const row = document.createElement('div');
+      row.className = 'persephone-panel-row';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'persephone-panel-label';
+      labelEl.textContent = label;
+
+      const toggle = document.createElement('label');
+      toggle.className = 'persephone-panel-toggle';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = get();
+      checkbox.setAttribute('data-key', key);
+      const track = document.createElement('span');
+      track.className = 'persephone-toggle-track';
+      toggle.appendChild(checkbox);
+      toggle.appendChild(track);
+
+      checkbox.addEventListener('change', () => {
+        const val = checkbox.checked;
+
+        if (key === 'extensionEnabled') {
+          extensionEnabled = val;
+          chrome.storage.sync.set({ extensionEnabled: val });
+          showExtensionIndicator(val);
+          if (val) {
+            scanAllResponses();
+          } else {
+            removeAllButtons();
+          }
+        } else if (key === autoSendKey) {
+          autoSendFirstChunk = val;
+          chrome.storage.sync.set({ [autoSendKey]: val });
+          showAutoSendIndicator(val);
+        } else if (key === 'autoSubmitVoice') {
+          autoSubmitVoice = val;
+          chrome.storage.sync.set({ autoSubmitVoice: val });
+        }
+      });
+
+      row.appendChild(labelEl);
+      row.appendChild(toggle);
+      panel.appendChild(row);
+    });
+
+    // Split threshold row
+    const thresholdRow = document.createElement('div');
+    thresholdRow.className = 'persephone-panel-row';
+    const thresholdLabel = document.createElement('span');
+    thresholdLabel.className = 'persephone-panel-label';
+    thresholdLabel.textContent = 'Split threshold';
+    const thresholdInput = document.createElement('input');
+    thresholdInput.type = 'number';
+    thresholdInput.className = 'persephone-panel-input';
+    thresholdInput.value = splitThreshold;
+    thresholdInput.min = '50';
+    thresholdInput.max = '2000';
+    thresholdInput.setAttribute('data-key', 'splitThreshold');
+
+    let thresholdDebounce = null;
+    thresholdInput.addEventListener('input', () => {
+      clearTimeout(thresholdDebounce);
+      thresholdDebounce = setTimeout(() => {
+        const val = parseInt(thresholdInput.value, 10);
+        if (val && val >= 50) {
+          splitThreshold = val;
+          chrome.storage.sync.set({ splitThreshold: val });
+          debug(`📝 Split threshold updated: ${val}`);
+        }
+      }, 600);
+    });
+
+    thresholdRow.appendChild(thresholdLabel);
+    thresholdRow.appendChild(thresholdInput);
+    panel.appendChild(thresholdRow);
+
+    // --- Toggle panel on gear click ---
+    gearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = panel.classList.contains('hidden');
+      if (isHidden) {
+        // Sync states before showing
+        updateWidgetStates();
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
+    });
+
+    // Prevent clicks inside panel from closing it
+    panel.addEventListener('click', (e) => e.stopPropagation());
+
+    // Click outside to close
+    document.addEventListener('click', () => {
+      if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+      }
+    });
+
+    document.body.appendChild(gearBtn);
+    document.body.appendChild(panel);
+    debug('⚙️ Settings widget injected');
+  }
+
+  // ============================================
   // INIT
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.6 (with voice input)');
+    debug('🚀 Persephone v3.7 (with settings widget)');
 
     injectStyles();
     injectMicButton();
+    injectSettingsWidget();
 
     // Load settings
     loadSettings();
@@ -1866,10 +2187,12 @@
         } else {
           removeAllButtons();
         }
+        updateWidgetStates();
       }
       if (request.type === 'AUTO_SEND_CHANGED') {
         autoSendFirstChunk = request.autoSendFirstChunk;
         showAutoSendIndicator(autoSendFirstChunk);
+        updateWidgetStates();
       }
       if (request.type === 'SKIP_KEYWORDS_CHANGED') {
         autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
@@ -1878,14 +2201,36 @@
       if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
         splitThreshold = request.splitThreshold || 250;
         debug(`📝 Split threshold updated: ${splitThreshold}`);
+        updateWidgetStates();
       }
       if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
         autoSubmitVoice = request.autoSubmitVoice === true;
         debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
+        updateWidgetStates();
       }
       if (request.type === 'INSERT_AND_SUBMIT') {
         insertTextAndSubmit(request.text);
       }
+    });
+
+    // Sync widget when settings change from another context (popup, other tab)
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'sync') return;
+      const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
+
+      if (changes.extensionEnabled) {
+        extensionEnabled = changes.extensionEnabled.newValue !== false;
+      }
+      if (changes[autoSendKey]) {
+        autoSendFirstChunk = changes[autoSendKey].newValue !== false;
+      }
+      if (changes.autoSubmitVoice) {
+        autoSubmitVoice = changes.autoSubmitVoice.newValue === true;
+      }
+      if (changes.splitThreshold) {
+        splitThreshold = changes.splitThreshold.newValue || 250;
+      }
+      updateWidgetStates();
     });
 
     setTimeout(() => {
