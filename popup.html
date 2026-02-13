@@ -47,11 +47,22 @@
 
     <div class="toggle-group">
       <div class="toggle-info">
-        <span class="toggle-label">Auto-send first chunk</span>
-        <span class="toggle-hint">Cmd/Ctrl+Shift+A to toggle</span>
+        <span class="toggle-label">Auto-send (Claude)</span>
+        <span class="toggle-hint">Stream first chunk on Claude</span>
       </div>
       <label class="switch">
-        <input type="checkbox" id="autoSendToggle">
+        <input type="checkbox" id="autoSendClaudeToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-group">
+      <div class="toggle-info">
+        <span class="toggle-label">Auto-send (Grok)</span>
+        <span class="toggle-hint">Stream first chunk on Grok</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="autoSendGrokToggle">
         <span class="slider"></span>
       </label>
     </div>

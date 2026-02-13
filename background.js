@@ -189,6 +189,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'BROADCAST_QUESTION') {
+    const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
+    const senderTabId = sender.tab?.id;
+    console.log('[Persephone] Broadcasting question to other tabs, sender:', senderTabId);
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      console.log('[Persephone] Found tabs:', tabs.map(t => `${t.id}:${t.url}`));
+      tabs.forEach(tab => {
+        if (tab.id !== senderTabId) {
+          console.log('[Persephone] Sending INSERT_AND_SUBMIT to tab:', tab.id, tab.url);
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'INSERT_AND_SUBMIT',
+            text: request.text
+          }).catch(err => console.error('[Persephone] Failed to send to tab:', tab.id, err));
+        }
+      });
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   if (request.type === 'GET_STATS') {
     // Return from cache immediately
     sendResponse({ messageCount: settingsCache.messageCount });

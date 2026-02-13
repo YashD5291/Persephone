@@ -2,7 +2,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const botTokenInput = document.getElementById('botToken');
   const chatIdInput = document.getElementById('chatId');
   const enabledToggle = document.getElementById('enabledToggle');
-  const autoSendToggle = document.getElementById('autoSendToggle');
+  const autoSendClaudeToggle = document.getElementById('autoSendClaudeToggle');
+  const autoSendGrokToggle = document.getElementById('autoSendGrokToggle');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
   const statusDot = document.getElementById('statusDot');
@@ -27,7 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'chatId',
     'messageCount',
     'extensionEnabled',
-    'autoSendFirstChunk',
+    'autoSendClaude',
+    'autoSendGrok',
     'autoSendSkipKeywords',
     'splitThreshold',
     'autoSubmitVoice'
@@ -36,7 +38,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settings.botToken) botTokenInput.value = settings.botToken;
   if (settings.chatId) chatIdInput.value = settings.chatId;
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
-  autoSendToggle.checked = settings.autoSendFirstChunk !== false; // Default true
+  autoSendClaudeToggle.checked = settings.autoSendClaude !== false; // Default true
+  autoSendGrokToggle.checked = settings.autoSendGrok !== false; // Default true
   splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
   autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
   messageCount.textContent = settings.messageCount || 0;
@@ -44,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load skip keywords
   const keywords = settings.autoSendSkipKeywords || DEFAULT_SKIP_KEYWORDS;
   skipKeywordsInput.value = keywords.join(', ');
-  updateKeywordsVisibility(settings.autoSendFirstChunk !== false);
+  updateKeywordsVisibility(settings.autoSendClaude !== false || settings.autoSendGrok !== false);
 
   updateStatus(settings.botToken && settings.chatId, settings.extensionEnabled !== false);
 
@@ -143,16 +146,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Auto-send toggle change
-  autoSendToggle.addEventListener('change', async () => {
-    const autoSendFirstChunk = autoSendToggle.checked;
-    await chrome.storage.sync.set({ autoSendFirstChunk });
-    updateKeywordsVisibility(autoSendFirstChunk);
+  // Auto-send toggle change (Claude)
+  autoSendClaudeToggle.addEventListener('change', async () => {
+    const autoSendClaude = autoSendClaudeToggle.checked;
+    await chrome.storage.sync.set({ autoSendClaude });
+    updateKeywordsVisibility(autoSendClaude || autoSendGrokToggle.checked);
 
-    // Notify content scripts
-    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+    chrome.tabs.query({ url: ['https://claude.ai/*'] }, (tabs) => {
       tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk });
+        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk: autoSendClaude });
+      });
+    });
+  });
+
+  // Auto-send toggle change (Grok)
+  autoSendGrokToggle.addEventListener('change', async () => {
+    const autoSendGrok = autoSendGrokToggle.checked;
+    await chrome.storage.sync.set({ autoSendGrok });
+    updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrok);
+
+    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk: autoSendGrok });
       });
     });
   });
@@ -234,10 +249,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       enabledToggle.checked = changes.extensionEnabled.newValue !== false;
       updateStatus(botTokenInput.value && chatIdInput.value, changes.extensionEnabled.newValue !== false);
     }
-    if (changes.autoSendFirstChunk !== undefined) {
-      const enabled = changes.autoSendFirstChunk.newValue !== false;
-      autoSendToggle.checked = enabled;
-      updateKeywordsVisibility(enabled);
+    if (changes.autoSendClaude !== undefined) {
+      autoSendClaudeToggle.checked = changes.autoSendClaude.newValue !== false;
+      updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrokToggle.checked);
+    }
+    if (changes.autoSendGrok !== undefined) {
+      autoSendGrokToggle.checked = changes.autoSendGrok.newValue !== false;
+      updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrokToggle.checked);
     }
     if (changes.autoSendSkipKeywords !== undefined) {
       const kw = changes.autoSendSkipKeywords.newValue || DEFAULT_SKIP_KEYWORDS;

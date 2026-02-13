@@ -1267,7 +1267,7 @@
       /* Toast */
       .persephone-toast {
         position: fixed;
-        bottom: 20px;
+        top: 20px;
         right: 20px;
         background: #ef4444;
         color: white;
@@ -1284,7 +1284,7 @@
       }
       
       @keyframes persephoneSlideIn {
-        from { opacity: 0; transform: translateY(20px); }
+        from { opacity: 0; transform: translateY(-20px); }
         to { opacity: 1; transform: translateY(0); }
       }
       
@@ -1437,9 +1437,10 @@
     if (!isContextValid()) return;
 
     try {
-      const settings = await chrome.storage.sync.get(['extensionEnabled', 'autoSendFirstChunk', 'autoSendSkipKeywords', 'splitThreshold', 'autoSubmitVoice']);
+      const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
+      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'autoSubmitVoice']);
       extensionEnabled = settings.extensionEnabled !== false; // Default true
-      autoSendFirstChunk = settings.autoSendFirstChunk !== false; // Default true
+      autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
       autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
       splitThreshold = settings.splitThreshold || 250;
       autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
@@ -1508,9 +1509,10 @@
   function toggleAutoSend() {
     autoSendFirstChunk = !autoSendFirstChunk;
 
-    // Save to storage
+    // Save to per-site storage key
     if (isContextValid()) {
-      chrome.storage.sync.set({ autoSendFirstChunk });
+      const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
+      chrome.storage.sync.set({ [autoSendKey]: autoSendFirstChunk });
     }
 
     // Show indicator
@@ -1660,6 +1662,16 @@
         console.log('[Persephone] TRANSCRIPTION:', transcription);
         debug('🎙️ Transcription:', transcription);
 
+        // Broadcast to other Grok/Claude tabs BEFORE submitting locally
+        debug('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
+        try {
+          chrome.runtime.sendMessage({ type: 'BROADCAST_QUESTION', text: current })
+            .then(r => debug('🎙️ Broadcast response:', r))
+            .catch(err => debug('🎙️ Broadcast error:', err));
+        } catch (e) {
+          debug('🎙️ Broadcast send threw:', e);
+        }
+
         if (autoSubmitVoice) {
           // Focus input and poke the framework before submitting
           input.focus();
@@ -1682,6 +1694,61 @@
         }
       }
     }, 30000);
+  }
+
+  /**
+   * Insert text into the chat input and submit (used by broadcast from other tabs).
+   * Uses multiple strategies because execCommand requires focus which the
+   * non-active tab in split view may not have.
+   */
+  function insertTextAndSubmit(text) {
+    debug('🎙️ Broadcast received:', text.substring(0, 50));
+    const input = findChatInput();
+    if (!input) {
+      debug('🎙️ Broadcast: no chat input found');
+      return;
+    }
+
+    // Try to grab focus
+    window.focus();
+    input.focus();
+
+    let inserted = false;
+
+    if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+      input.value = text;
+      inserted = true;
+    } else {
+      // Contenteditable (ProseMirror) — try execCommand first
+      try {
+        const sel = window.getSelection();
+        sel.selectAllChildren(input);
+        document.execCommand('delete');
+        inserted = document.execCommand('insertText', false, text);
+      } catch (e) {
+        debug('🎙️ execCommand failed:', e.message);
+      }
+
+      // Check if execCommand actually inserted text
+      if (!inserted || !getInputValue(input).trim()) {
+        debug('🎙️ execCommand did not work, using innerHTML fallback');
+        // Direct DOM manipulation — ProseMirror's DOMObserver picks up mutations
+        input.innerHTML = '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>';
+        inserted = true;
+      }
+    }
+
+    // Poke the framework so it picks up the change
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Small delay to let ProseMirror sync its internal state before submitting
+    setTimeout(() => {
+      input.focus();
+      submitChatInput();
+      debug('🎙️ Broadcast: submitted');
+    }, 100);
   }
 
   /**
@@ -1815,6 +1882,9 @@
       if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
         autoSubmitVoice = request.autoSubmitVoice === true;
         debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
+      }
+      if (request.type === 'INSERT_AND_SUBMIT') {
+        insertTextAndSubmit(request.text);
       }
     });
 
