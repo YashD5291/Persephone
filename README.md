@@ -13,7 +13,8 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 
 ### Auto-Send First Chunk
 - **Enabled by default** - automatically live-streams the first paragraph/heading when the AI starts responding
-- Toggle in extension popup or press `Cmd/Ctrl+Shift+A` on page
+- **Per-site toggles** - enable/disable independently for Claude and Grok in the extension popup
+- Press `Cmd/Ctrl+Shift+A` on page to toggle the current site's auto-send
 - Visual indicator shows when auto-send is ON/OFF
 - **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking the AI to shorten/rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
 
@@ -46,6 +47,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Uses Chrome Native Messaging to trigger MacWhisper's F5 shortcut via a local Python host
 - MacWhisper transcribes speech and types directly into the focused chat input
 - **Auto-submit**: optionally submits the transcribed text immediately when recording stops (ideal for meetings)
+- **Broadcast to all tabs**: when auto-submit is on, the transcribed question is sent to all open Grok/Claude tabs simultaneously (great for split-view comparison)
 - Keyboard shortcut: `Alt+M` to toggle recording
 - Mic button turns red and pulses while recording
 
@@ -233,7 +235,7 @@ Content is converted to Telegram Markdown:
 
 ### On Page
 - `Cmd + Shift + E` (Mac) / `Ctrl + Shift + E` (Windows/Linux) - Toggle extension ON/OFF
-- `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send first chunk ON/OFF
+- `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send for current site ON/OFF
 - `Alt + M` - Toggle MacWhisper recording (start/stop)
 
 ### Edit Modal
@@ -247,7 +249,8 @@ Content is converted to Telegram Markdown:
 | Bot Token | — | Telegram bot token from @BotFather |
 | Chat ID | — | Telegram chat/user ID |
 | Enable Extension | ON | Master toggle (also via Cmd/Ctrl+Shift+E) |
-| Auto-send first chunk | ON | Live-stream first paragraph to Telegram |
+| Auto-send (Claude) | ON | Live-stream first paragraph on Claude |
+| Auto-send (Grok) | ON | Live-stream first paragraph on Grok |
 | Auto-submit voice input | OFF | Automatically submit transcribed text when recording stops |
 | Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
 | Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
@@ -297,6 +300,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v4.2** - Per-site auto-send toggles (Claude/Grok independent), voice broadcast to all open tabs
 - **v4.1** - MacWhisper voice input via native messaging, floating mic button, auto-submit, Alt+M shortcut
 - **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling
 - **v3.6** - Skip keywords for auto-send (configurable via popup, skips auto-send when question contains keywords like "shorter")
