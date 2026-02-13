@@ -1,5 +1,5 @@
 // Persephone - Content Script for grok.com and claude.ai
-// v3.4 - Multi-site support (Grok + Claude)
+// v3.8 - Screenshot capture + Multi-site support (Grok + Claude)
 
 (function() {
   'use strict';
@@ -14,6 +14,8 @@
   let autoSendFirstChunk = true; // Enabled by default
   let splitThreshold = 250; // Character count above which paragraphs get split send buttons
   let autoSubmitVoice = false; // Auto-submit transcribed voice input
+  let screenshotStream = null;   // Active MediaStream from getDisplayMedia
+  let screenshotVideo = null;    // Hidden <video> element for frame capture
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
@@ -1264,6 +1266,57 @@
         50% { box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7); transform: scale(1.06); }
       }
 
+      /* Floating Camera Button */
+      .persephone-camera-btn {
+        position: fixed;
+        bottom: 128px;
+        right: 30px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: none;
+        background: #525252;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        z-index: 9999998;
+        transition: background 0.2s, transform 0.15s;
+      }
+      .persephone-camera-btn:hover {
+        background: #3f3f3f;
+        transform: scale(1.08);
+      }
+      .persephone-camera-btn:active {
+        transform: scale(0.95);
+      }
+      .persephone-camera-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+      .persephone-camera-btn.stream-active::after {
+        content: '';
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        width: 10px;
+        height: 10px;
+        background: #22c55e;
+        border-radius: 50%;
+        border: 2px solid #525252;
+        pointer-events: none;
+      }
+      .persephone-camera-btn.capturing {
+        animation: persephoneCaptureFlash 0.3s ease;
+      }
+      @keyframes persephoneCaptureFlash {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+      }
+
       /* Toast */
       .persephone-toast {
         position: fixed;
@@ -1460,7 +1513,7 @@
       /* Settings Panel */
       .persephone-settings-panel {
         position: fixed;
-        bottom: 136px;
+        bottom: 176px;
         right: 24px;
         width: 260px;
         background: #fff;
@@ -1973,6 +2026,169 @@
   }
 
   // ============================================
+  // SCREENSHOT CAPTURE
+  // ============================================
+
+  /**
+   * Capture a frame from the active screenshot stream and return as a Blob.
+   */
+  function captureFrame() {
+    return new Promise((resolve) => {
+      if (!screenshotVideo || !screenshotStream) {
+        resolve(null);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = screenshotVideo.videoWidth;
+      canvas.height = screenshotVideo.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(screenshotVideo, 0, 0);
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+
+  /**
+   * Paste a screenshot blob into the chat input via synthetic paste event.
+   * Also writes to clipboard as fallback (user can Cmd+V).
+   */
+  async function pasteScreenshotIntoChat(blob) {
+    const input = findChatInput();
+
+    // 1. Write to clipboard (backup — user can always Cmd+V)
+    try {
+      const clipItem = new ClipboardItem({ 'image/png': blob });
+      await navigator.clipboard.write([clipItem]);
+    } catch (e) {
+      debug('📸 Clipboard write failed:', e.message);
+    }
+
+    if (!input) return;
+
+    // 2. Focus the input
+    window.focus();
+    input.focus();
+
+    // 3. Attempt synthetic paste event (works in most ProseMirror setups)
+    try {
+      const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt
+      });
+      input.dispatchEvent(pasteEvent);
+    } catch (e) {
+      debug('📸 Synthetic paste failed:', e.message);
+    }
+  }
+
+  /**
+   * Stop the active screenshot stream and clean up.
+   */
+  function stopScreenshotStream() {
+    if (screenshotStream) {
+      screenshotStream.getTracks().forEach(t => t.stop());
+      screenshotStream = null;
+    }
+    if (screenshotVideo) {
+      screenshotVideo.remove();
+      screenshotVideo = null;
+    }
+    const btn = document.querySelector('.persephone-camera-btn');
+    if (btn) btn.classList.remove('stream-active');
+    debug('📸 Stream stopped');
+  }
+
+  /**
+   * Handle camera button click.
+   * First click: prompt user to select a window (getDisplayMedia).
+   * Subsequent clicks: capture frame instantly from the existing stream.
+   * Alt+click: stop the active stream.
+   */
+  async function handleScreenshotClick(e) {
+    const btn = document.querySelector('.persephone-camera-btn');
+
+    // Alt+click to stop stream
+    if (e.altKey && screenshotStream) {
+      stopScreenshotStream();
+      showToast('Screenshot stream stopped');
+      return;
+    }
+
+    // If no active stream, start one
+    if (!screenshotStream) {
+      try {
+        screenshotStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      } catch (err) {
+        debug('📸 getDisplayMedia cancelled or failed:', err.message);
+        return;
+      }
+
+      // Create hidden video element
+      screenshotVideo = document.createElement('video');
+      screenshotVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;';
+      screenshotVideo.srcObject = screenshotStream;
+      screenshotVideo.muted = true;
+      document.body.appendChild(screenshotVideo);
+
+      // Wait for video to be ready
+      await new Promise((resolve) => {
+        screenshotVideo.onloadedmetadata = () => {
+          screenshotVideo.play().then(resolve).catch(resolve);
+        };
+      });
+
+      // Listen for user stopping the share from the Chrome bar
+      screenshotStream.getVideoTracks()[0].addEventListener('ended', () => {
+        stopScreenshotStream();
+      });
+
+      if (btn) btn.classList.add('stream-active');
+      debug('📸 Stream started');
+    }
+
+    // Capture frame
+    const blob = await captureFrame();
+    if (!blob) {
+      showToast('Screenshot capture failed');
+      return;
+    }
+
+    // Brief pulse animation
+    if (btn) {
+      btn.classList.add('capturing');
+      setTimeout(() => btn.classList.remove('capturing'), 300);
+    }
+
+    // Paste into chat
+    await pasteScreenshotIntoChat(blob);
+    showToast('Screenshot captured (Cmd+V to paste if needed)');
+  }
+
+  /**
+   * Inject the floating camera button into the page.
+   */
+  function injectScreenshotButton() {
+    if (document.querySelector('.persephone-camera-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'persephone-camera-btn';
+    btn.title = 'Screenshot capture (Alt+click to stop)';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4z"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>`;
+
+    // Prevent mousedown from stealing focus away from chat input
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
+    btn.addEventListener('click', handleScreenshotClick);
+
+    document.body.appendChild(btn);
+    debug('📸 Camera button injected');
+  }
+
+  // ============================================
   // FLOATING SETTINGS WIDGET
   // ============================================
 
@@ -2144,11 +2360,12 @@
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.7 (with settings widget)');
+    debug('🚀 Persephone v3.8 (with screenshot capture)');
 
     injectStyles();
     injectMicButton();
     injectSettingsWidget();
+    injectScreenshotButton();
 
     // Load settings
     loadSettings();

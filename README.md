@@ -1,6 +1,6 @@
 # Persephone
 
-A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](https://claude.ai) and lets you send AI responses to Telegram with inline controls. Also supports voice-to-chat via MacWhisper integration.
+A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](https://claude.ai) and lets you send AI responses to Telegram with inline controls. Also supports voice-to-chat via MacWhisper integration and screenshot capture from other windows.
 
 ## Features
 
@@ -50,6 +50,16 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - **Broadcast to all tabs**: when auto-submit is on, the transcribed question is sent to all open Grok/Claude tabs simultaneously (great for split-view comparison)
 - Keyboard shortcut: `Alt+M` to toggle recording
 - Mic button turns red and pulses while recording
+
+### Screenshot Capture
+- **Floating camera button** on Grok/Claude pages — click to capture a screenshot from another window (e.g., Zoom, slides)
+- First click opens Chrome's window/screen picker via `getDisplayMedia()` — select the window you want to capture
+- **Stream stays open** — subsequent clicks capture instantly without re-picking
+- Screenshot is copied to clipboard and pasted into the chat input automatically (synthetic paste into ProseMirror)
+- If synthetic paste doesn't work, image is on clipboard — just `Cmd+V`
+- Green dot on camera button indicates an active stream
+- **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome)
+- Button sits above the gear icon in the bottom-right floating stack
 
 ### Performance Optimizations
 - **API Preconnect**: Establishes connection to Telegram API proactively when streaming starts
@@ -176,6 +186,14 @@ Claude restructures its DOM when streaming completes - Persephone handles this b
 └──────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
+│  SCREENSHOT CAPTURE (getDisplayMedia)                              │
+│  - Camera button click → getDisplayMedia() → select window         │
+│  - Stream kept open → subsequent clicks capture instantly           │
+│  - Frame drawn to canvas → PNG blob → clipboard + synthetic paste   │
+│  - Alt+click or Chrome "Stop sharing" → cleanup stream              │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
 │  VOICE INPUT (MacWhisper via Native Messaging)                    │
 │  - Mic button click → focus chat input → TOGGLE_WHISPER           │
 │  - background.js → sendNativeMessage → persephone_host.py         │
@@ -300,6 +318,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow
 - **v4.2** - Per-site auto-send toggles (Claude/Grok independent), voice broadcast to all open tabs
 - **v4.1** - MacWhisper voice input via native messaging, floating mic button, auto-submit, Alt+M shortcut
 - **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling
