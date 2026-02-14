@@ -2056,20 +2056,39 @@
 
   /**
    * Capture a frame from the active screenshot stream and return as a Blob.
+   * Uses ImageCapture API for native-resolution grab, falls back to canvas.
    */
-  function captureFrame() {
-    return new Promise((resolve) => {
-      if (!screenshotVideo || !screenshotStream) {
-        resolve(null);
-        return;
-      }
+  async function captureFrame() {
+    if (!screenshotStream) return null;
+
+    const track = screenshotStream.getVideoTracks()[0];
+    if (!track) return null;
+
+    // Try ImageCapture.grabFrame() — gets raw frame at native resolution
+    try {
+      const imageCapture = new ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      debug(`📸 Capture resolution: ${bitmap.width}×${bitmap.height}`);
       const canvas = document.createElement('canvas');
-      canvas.width = screenshotVideo.videoWidth;
-      canvas.height = screenshotVideo.videoHeight;
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(screenshotVideo, 0, 0);
-      canvas.toBlob((blob) => resolve(blob), 'image/png');
-    });
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    } catch (e) {
+      debug('📸 ImageCapture failed, using video fallback:', e.message);
+    }
+
+    // Fallback: draw from video element
+    if (!screenshotVideo) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = screenshotVideo.videoWidth;
+    canvas.height = screenshotVideo.videoHeight;
+    debug(`📸 Capture resolution (fallback): ${canvas.width}×${canvas.height}`);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(screenshotVideo, 0, 0);
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   }
 
   /**
@@ -2145,7 +2164,13 @@
     // If no active stream, start one
     if (!screenshotStream) {
       try {
-        screenshotStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenshotStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: 3840 },
+            height: { ideal: 2160 },
+            frameRate: { ideal: 1 }
+          }
+        });
       } catch (err) {
         debug('📸 getDisplayMedia cancelled or failed:', err.message);
         return;
@@ -2171,7 +2196,10 @@
       });
 
       if (btn) btn.classList.add('stream-active');
-      debug('📸 Stream started');
+      const trackSettings = screenshotStream.getVideoTracks()[0].getSettings();
+      debug(`📸 Stream started — ${trackSettings.width}×${trackSettings.height} @ ${trackSettings.frameRate}fps`);
+      showToast('Window selected — click again to capture');
+      return;
     }
 
     // Capture frame
