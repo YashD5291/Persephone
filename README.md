@@ -58,6 +58,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Screenshot is copied to clipboard and pasted into the chat input automatically (synthetic paste into ProseMirror)
 - If synthetic paste doesn't work, image is on clipboard — just `Cmd+V`
 - Green dot on camera button indicates an active stream
+- **Broadcast to all tabs** — screenshot is automatically pasted into all other open Grok/Claude tabs (paste only, no submit)
 - **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome)
 - Button sits above the gear icon in the bottom-right floating stack
 
@@ -190,6 +191,7 @@ Claude restructures its DOM when streaming completes - Persephone handles this b
 │  - Camera button click → getDisplayMedia() → select window         │
 │  - Stream kept open → subsequent clicks capture instantly           │
 │  - Frame drawn to canvas → PNG blob → clipboard + synthetic paste   │
+│  - Blob → dataURL → BROADCAST_SCREENSHOT → all other tabs paste     │
 │  - Alt+click or Chrome "Stop sharing" → cleanup stream              │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -318,7 +320,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
-- **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow
+- **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow, broadcast to all tabs
 - **v4.2** - Per-site auto-send toggles (Claude/Grok independent), voice broadcast to all open tabs
 - **v4.1** - MacWhisper voice input via native messaging, floating mic button, auto-submit, Alt+M shortcut
 - **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling

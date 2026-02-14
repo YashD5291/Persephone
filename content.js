@@ -2030,6 +2030,31 @@
   // ============================================
 
   /**
+   * Convert a Blob to a data URL string for message passing.
+   */
+  function blobToDataUrl(blob) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Convert a data URL string back to a Blob.
+   */
+  function dataUrlToBlob(dataUrl) {
+    const [header, base64] = dataUrl.split(',');
+    const mime = header.match(/:(.*?);/)[1];
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    return new Blob([array], { type: mime });
+  }
+
+  /**
    * Capture a frame from the active screenshot stream and return as a Blob.
    */
   function captureFrame() {
@@ -2164,6 +2189,17 @@
 
     // Paste into chat
     await pasteScreenshotIntoChat(blob);
+
+    // Broadcast to other tabs (paste only, no submit)
+    blobToDataUrl(blob).then(dataUrl => {
+      try {
+        chrome.runtime.sendMessage({ type: 'BROADCAST_SCREENSHOT', dataUrl })
+          .catch(err => debug('📸 Broadcast error:', err));
+      } catch (e) {
+        debug('📸 Broadcast send threw:', e);
+      }
+    });
+
     showToast('Screenshot captured (Cmd+V to paste if needed)');
   }
 
@@ -2427,6 +2463,11 @@
       }
       if (request.type === 'INSERT_AND_SUBMIT') {
         insertTextAndSubmit(request.text);
+      }
+      if (request.type === 'PASTE_SCREENSHOT') {
+        const blob = dataUrlToBlob(request.dataUrl);
+        pasteScreenshotIntoChat(blob);
+        debug('📸 Screenshot pasted from broadcast');
       }
     });
 

@@ -209,6 +209,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'BROADCAST_SCREENSHOT') {
+    const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
+    const senderTabId = sender.tab?.id;
+    console.log('[Persephone] Broadcasting screenshot to other tabs, sender:', senderTabId);
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.id !== senderTabId) {
+          console.log('[Persephone] Sending PASTE_SCREENSHOT to tab:', tab.id, tab.url);
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'PASTE_SCREENSHOT',
+            dataUrl: request.dataUrl
+          }).catch(err => console.error('[Persephone] Failed to send screenshot to tab:', tab.id, err));
+        }
+      });
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   if (request.type === 'GET_STATS') {
     // Return from cache immediately
     sendResponse({ messageCount: settingsCache.messageCount });
