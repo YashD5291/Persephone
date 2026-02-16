@@ -2,8 +2,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const botTokenInput = document.getElementById('botToken');
   const chatIdInput = document.getElementById('chatId');
   const enabledToggle = document.getElementById('enabledToggle');
-  const autoSendClaudeToggle = document.getElementById('autoSendClaudeToggle');
-  const autoSendGrokToggle = document.getElementById('autoSendGrokToggle');
   const saveBtn = document.getElementById('saveBtn');
   const testBtn = document.getElementById('testBtn');
   const statusDot = document.getElementById('statusDot');
@@ -28,8 +26,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     'chatId',
     'messageCount',
     'extensionEnabled',
-    'autoSendClaude',
-    'autoSendGrok',
     'autoSendSkipKeywords',
     'splitThreshold',
     'autoSubmitVoice'
@@ -38,8 +34,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settings.botToken) botTokenInput.value = settings.botToken;
   if (settings.chatId) chatIdInput.value = settings.chatId;
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
-  autoSendClaudeToggle.checked = settings.autoSendClaude !== false; // Default true
-  autoSendGrokToggle.checked = settings.autoSendGrok !== false; // Default true
   splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
   autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
   messageCount.textContent = settings.messageCount || 0;
@@ -47,7 +41,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load skip keywords
   const keywords = settings.autoSendSkipKeywords || DEFAULT_SKIP_KEYWORDS;
   skipKeywordsInput.value = keywords.join(', ');
-  updateKeywordsVisibility(settings.autoSendClaude !== false || settings.autoSendGrok !== false);
 
   updateStatus(settings.botToken && settings.chatId, settings.extensionEnabled !== false);
 
@@ -146,32 +139,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Auto-send toggle change (Claude)
-  autoSendClaudeToggle.addEventListener('change', async () => {
-    const autoSendClaude = autoSendClaudeToggle.checked;
-    await chrome.storage.sync.set({ autoSendClaude });
-    updateKeywordsVisibility(autoSendClaude || autoSendGrokToggle.checked);
-
-    chrome.tabs.query({ url: ['https://claude.ai/*'] }, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk: autoSendClaude });
-      });
-    });
-  });
-
-  // Auto-send toggle change (Grok)
-  autoSendGrokToggle.addEventListener('change', async () => {
-    const autoSendGrok = autoSendGrokToggle.checked;
-    await chrome.storage.sync.set({ autoSendGrok });
-    updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrok);
-
-    chrome.tabs.query({ url: ['https://grok.com/*', 'https://x.com/i/grok*'] }, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { type: 'AUTO_SEND_CHANGED', autoSendFirstChunk: autoSendGrok });
-      });
-    });
-  });
-
   // Auto-submit voice toggle change
   autoSubmitVoiceToggle.addEventListener('change', async () => {
     const autoSubmitVoice = autoSubmitVoiceToggle.checked;
@@ -214,10 +181,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     showMessage('Keywords reset to defaults', 'success');
   });
 
-  function updateKeywordsVisibility(autoSendEnabled) {
-    keywordsSection.style.display = autoSendEnabled ? 'block' : 'none';
-  }
-
   // Split threshold: save on change
   let thresholdSaveTimeout = null;
   splitThresholdInput.addEventListener('input', () => {
@@ -248,14 +211,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (changes.extensionEnabled !== undefined) {
       enabledToggle.checked = changes.extensionEnabled.newValue !== false;
       updateStatus(botTokenInput.value && chatIdInput.value, changes.extensionEnabled.newValue !== false);
-    }
-    if (changes.autoSendClaude !== undefined) {
-      autoSendClaudeToggle.checked = changes.autoSendClaude.newValue !== false;
-      updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrokToggle.checked);
-    }
-    if (changes.autoSendGrok !== undefined) {
-      autoSendGrokToggle.checked = changes.autoSendGrok.newValue !== false;
-      updateKeywordsVisibility(autoSendClaudeToggle.checked || autoSendGrokToggle.checked);
     }
     if (changes.autoSendSkipKeywords !== undefined) {
       const kw = changes.autoSendSkipKeywords.newValue || DEFAULT_SKIP_KEYWORDS;

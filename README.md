@@ -13,8 +13,8 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 
 ### Auto-Send First Chunk
 - **Enabled by default** - automatically live-streams the first paragraph/heading when the AI starts responding
-- **Per-site toggles** - enable/disable independently for Claude and Grok in the extension popup
-- Press `Cmd/Ctrl+Shift+A` on page to toggle the current site's auto-send
+- **Per-tab control** - toggle auto-send independently for each open Grok/Claude tab from the floating settings widget
+- Press `Cmd/Ctrl+Shift+A` on page to toggle the current tab's auto-send
 - Visual indicator shows when auto-send is ON/OFF
 - **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking the AI to shorten/rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
 
@@ -62,6 +62,16 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome)
 - Button sits above the gear icon in the bottom-right floating stack
 
+### Floating Settings Widget
+- **Gear button** in the bottom-right corner of Grok/Claude pages — click to open the settings panel
+- **Extension toggle** — enable/disable Persephone without opening the popup
+- **Voice auto-submit toggle** — turn auto-submit on/off directly from the page
+- **Tab list with per-tab auto-send** — shows all open Grok/Claude tabs with their site badge (C/G), title, and individual auto-send toggles
+- Current tab marked with "(here)" label
+- **Split threshold** — adjust the sub-chunk split threshold inline
+- Click outside the panel to close it
+- Settings sync instantly across the popup, widget, and all tabs via Chrome storage
+
 ### Performance Optimizations
 - **API Preconnect**: Establishes connection to Telegram API proactively when streaming starts
 - **Settings Caching**: Credentials cached in memory for instant access
@@ -74,7 +84,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 |------|---------------------|-----------|---------------|
 | [grok.com](https://grok.com) | `animate-gaussian` spans | Yes | Yes |
 | [x.com/i/grok](https://x.com/i/grok) | `animate-gaussian` spans | Yes | Yes |
-| [claude.ai](https://claude.ai) | `data-is-streaming` attribute | Yes | Yes (question detection TBD) |
+| [claude.ai](https://claude.ai) | `data-is-streaming` attribute | Yes | Yes |
 
 ## Installation
 
@@ -202,6 +212,16 @@ Claude restructures its DOM when streaming completes - Persephone handles this b
 │  - Python host simulates F5 keypress via osascript                │
 │  - MacWhisper transcribes and types into focused input            │
 │  - Stop recording → poll input for text → auto-submit (optional)  │
+│  - BROADCAST_QUESTION → insert + submit in all other tabs          │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│  FLOATING SETTINGS WIDGET (gear button)                            │
+│  - Extension toggle, voice auto-submit toggle                      │
+│  - Tab list: GET_TAB_LIST → background queries all matching tabs   │
+│  - Per-tab auto-send toggles (SET_TAB_AUTO_SEND to other tabs)     │
+│  - Split threshold input (debounced save)                          │
+│  - Syncs with popup and storage changes in real time               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -255,7 +275,7 @@ Content is converted to Telegram Markdown:
 
 ### On Page
 - `Cmd + Shift + E` (Mac) / `Ctrl + Shift + E` (Windows/Linux) - Toggle extension ON/OFF
-- `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send for current site ON/OFF
+- `Cmd + Shift + A` (Mac) / `Ctrl + Shift + A` (Windows/Linux) - Toggle auto-send for current tab ON/OFF
 - `Alt + M` - Toggle MacWhisper recording (start/stop)
 
 ### Edit Modal
@@ -269,11 +289,18 @@ Content is converted to Telegram Markdown:
 | Bot Token | — | Telegram bot token from @BotFather |
 | Chat ID | — | Telegram chat/user ID |
 | Enable Extension | ON | Master toggle (also via Cmd/Ctrl+Shift+E) |
-| Auto-send (Claude) | ON | Live-stream first paragraph on Claude |
-| Auto-send (Grok) | ON | Live-stream first paragraph on Grok |
 | Auto-submit voice input | OFF | Automatically submit transcribed text when recording stops |
 | Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
 | Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
+
+## Widget Settings (on-page)
+
+| Setting | Description |
+|---------|-------------|
+| Extension | Master toggle (same as popup) |
+| Voice auto-submit | Toggle auto-submit for voice input |
+| Auto-send (per tab) | Toggle auto-send individually for each open Grok/Claude tab |
+| Split threshold | Adjust sub-chunk split threshold |
 
 ## Troubleshooting
 
@@ -302,7 +329,7 @@ Content is converted to Telegram Markdown:
 - Restart Chrome after installing the native host
 
 **Voice auto-submit not working:**
-- Enable "Auto-submit voice input" in the extension popup
+- Enable "Voice auto-submit" in the extension popup or the floating settings widget
 - Make sure the chat input is focused before starting recording (the mic button does this automatically)
 - If you switched tabs during recording, click the chat input area before stopping
 
@@ -320,7 +347,9 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
-- **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow, broadcast to all tabs
+- **v4.5** - Floating settings widget with gear button, per-tab auto-send management via tab list, inline extension/voice/threshold controls
+- **v4.4** - Screenshot broadcast to all tabs, ImageCapture API for higher-resolution frames
+- **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow
 - **v4.2** - Per-site auto-send toggles (Claude/Grok independent), voice broadcast to all open tabs
 - **v4.1** - MacWhisper voice input via native messaging, floating mic button, auto-submit, Alt+M shortcut
 - **v4.0** - Claude.ai support, live streaming to Telegram, configurable split threshold, DOM rebuild handling

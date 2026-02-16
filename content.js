@@ -1972,8 +1972,6 @@
       return;
     }
 
-    // Try to grab focus
-    window.focus();
     input.focus();
 
     let inserted = false;
@@ -2520,10 +2518,10 @@
       e.stopPropagation();
       const isHidden = panel.classList.contains('hidden');
       if (isHidden) {
-        // Sync states before showing
+        panel.classList.remove('hidden');
+        // Sync states after showing (updateWidgetStates bails if panel is hidden)
         updateWidgetStates();
         fetchAndRenderTabs();
-        panel.classList.remove('hidden');
       } else {
         panel.classList.add('hidden');
       }
@@ -2634,16 +2632,16 @@
       }
     });
 
-    // Sync widget when settings change from another context (popup, other tab)
+    // Sync widget when settings change from another context (popup, other tab's widget)
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'sync') return;
-      const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
 
       if (changes.extensionEnabled) {
-        extensionEnabled = changes.extensionEnabled.newValue !== false;
-      }
-      if (changes[autoSendKey]) {
-        autoSendFirstChunk = changes[autoSendKey].newValue !== false;
+        const val = changes.extensionEnabled.newValue !== false;
+        if (val !== extensionEnabled) {
+          extensionEnabled = val;
+          if (val) { scanAllResponses(); } else { removeAllButtons(); }
+        }
       }
       if (changes.autoSubmitVoice) {
         autoSubmitVoice = changes.autoSubmitVoice.newValue === true;
