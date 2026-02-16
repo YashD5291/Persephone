@@ -1843,6 +1843,19 @@
     return rect.width > 0 && rect.height > 0;
   }
 
+  function scoreChatInputCandidate(el) {
+    let score = 0;
+    if (!el) return score;
+    if (isVisibleElement(el)) score += 100;
+    if (el.matches?.('[contenteditable="true"]')) score += 20;
+    if (el.matches?.('div.ProseMirror')) score += 15;
+    if (el.matches?.('[data-testid="chat-input"]')) score += 30;
+    if (el.matches?.('[role="textbox"]')) score += 10;
+    if (el.closest('form')) score += 5;
+    if (el.closest('[aria-hidden="true"]')) score -= 200;
+    return score;
+  }
+
   /**
    * Find the chat input element, trying the primary selector then fallbacks.
    * Prefers visible editors so inactive tabs don't select hidden stale nodes.
@@ -1851,21 +1864,28 @@
     const allowHidden = options.allowHidden === true;
     const selectors = [
       SELECTORS.chatInput,
+      '[data-testid="chat-input"][contenteditable="true"]',
+      '[role="textbox"][contenteditable="true"]',
       'div.ProseMirror[contenteditable="true"]',
       '[contenteditable="true"]'
     ];
-    const candidates = [];
+    const candidateSet = new Set();
     selectors.forEach((selector) => {
       if (!selector) return;
-      document.querySelectorAll(selector).forEach((el) => candidates.push(el));
+      document.querySelectorAll(selector).forEach((el) => candidateSet.add(el));
     });
+    const candidates = Array.from(candidateSet);
 
     if (candidates.length === 0) return null;
 
-    const visible = candidates.find((el) => isVisibleElement(el));
-    if (visible) return visible;
+    const ranked = candidates
+      .map((el) => ({ el, score: scoreChatInputCandidate(el) }))
+      .sort((a, b) => b.score - a.score);
 
-    if (allowHidden) return candidates[0];
+    const bestVisible = ranked.find((entry) => isVisibleElement(entry.el));
+    if (bestVisible) return bestVisible.el;
+
+    if (allowHidden && ranked.length > 0) return ranked[0].el;
     return null;
   }
 
@@ -1878,6 +1898,21 @@
       }
     }
     return null;
+  }
+
+  function placeCaretAtEnd(el) {
+    try {
+      if (!el || !el.isContentEditable) return;
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (e) {
+      // Selection APIs can fail in inactive tabs; safe to ignore.
+    }
   }
 
   /**
@@ -2012,7 +2047,8 @@
    * Uses multiple strategies because execCommand requires focus which the
    * non-active tab in split view may not have.
    */
-  function insertTextAndSubmit(text) {
+  function insertTextAndSubmit(text, options = {}) {
+    const focusInput = options.focusInput === true;
     debug('🎙️ Broadcast received:', text.substring(0, 50));
     const input = findChatInput();
     if (!input) {
@@ -2020,7 +2056,9 @@
       return;
     }
 
-    input.focus();
+    if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
+      input.focus();
+    }
 
     let inserted = false;
 
@@ -2054,7 +2092,9 @@
 
     // Small delay to let ProseMirror sync its internal state before submitting
     setTimeout(() => {
-      input.focus();
+      if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
+        input.focus();
+      }
       submitChatInput();
       debug('🎙️ Broadcast: submitted');
     }, 100);
@@ -2223,12 +2263,23 @@
     if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
       input.focus();
     }
+    placeCaretAtEnd(input);
 
     // 2. Attempt synthetic paste event (works in most ProseMirror setups)
     try {
       const file = new File([blob], 'screenshot.png', { type: 'image/png' });
       const dt = new DataTransfer();
       dt.items.add(file);
+      try {
+        input.dispatchEvent(new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertFromPaste',
+          dataTransfer: dt
+        }));
+      } catch (e) {
+        // Some browsers do not accept dataTransfer in InputEvent initializer.
+      }
       const pasteEvent = new ClipboardEvent('paste', {
         bubbles: true,
         cancelable: true,
@@ -2681,7 +2732,7 @@
         updateWidgetStates();
       }
       if (request.type === 'INSERT_AND_SUBMIT') {
-        insertTextAndSubmit(request.text);
+        insertTextAndSubmit(request.text, { focusInput: false });
       }
       if (request.type === 'PASTE_SCREENSHOT') {
         const blob = dataUrlToBlob(request.dataUrl);
