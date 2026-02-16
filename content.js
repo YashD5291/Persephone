@@ -2242,6 +2242,8 @@
     const focusInput = options.focusInput !== false;
     const writeClipboard = options.writeClipboard !== false;
     const allowHiddenInput = options.allowHiddenInput === true;
+    const inputRetryAttempts = options.inputRetryAttempts || 5;
+    const inputRetryDelayMs = options.inputRetryDelayMs || 120;
 
     // 1. Write to clipboard only from the initiating tab.
     if (writeClipboard) {
@@ -2253,7 +2255,7 @@
       }
     }
 
-    const input = await findChatInputWithRetry(5, 120, { allowHidden: allowHiddenInput });
+    const input = await findChatInputWithRetry(inputRetryAttempts, inputRetryDelayMs, { allowHidden: allowHiddenInput });
     if (!input) {
       debug('📸 Screenshot paste failed: chat input not found');
       return false;
@@ -2739,10 +2741,14 @@
         pasteScreenshotIntoChat(blob, {
           focusInput: false,
           writeClipboard: false,
-          allowHiddenInput: true
+          allowHiddenInput: true,
+          inputRetryAttempts: 25,
+          inputRetryDelayMs: 200
         }).then((ok) => {
           debug(ok ? '📸 Screenshot pasted from broadcast' : '📸 Screenshot broadcast paste failed');
+          sendResponse({ success: ok });
         });
+        return true;
       }
       if (request.type === 'SET_AUTO_SEND_STATE') {
         autoSendFirstChunk = request.autoSend;

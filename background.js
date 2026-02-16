@@ -32,6 +32,37 @@ function saveTabOverrides() {
   chrome.storage.local.set({ tabAutoSendOverrides });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendScreenshotToTabWithRetry(tab, dataUrl, maxAttempts = 6) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'PASTE_SCREENSHOT',
+        dataUrl
+      });
+
+      if (response?.success) {
+        console.log(`[Persephone] Screenshot paste ACK from tab ${tab.id} on attempt ${attempt}`);
+        return true;
+      }
+
+      console.warn(`[Persephone] Screenshot paste NACK/empty from tab ${tab.id} on attempt ${attempt}`);
+    } catch (err) {
+      console.error(`[Persephone] Failed screenshot send to tab ${tab.id} on attempt ${attempt}:`, err?.message || err);
+    }
+
+    if (attempt < maxAttempts) {
+      await sleep(200 * attempt);
+    }
+  }
+
+  console.error(`[Persephone] Screenshot delivery failed after retries for tab ${tab.id}: ${tab.url}`);
+  return false;
+}
+
 // Clean up overrides for closed tabs
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId in tabAutoSendOverrides) {
@@ -300,16 +331,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const senderTabId = sender.tab?.id;
     console.log('[Persephone] Broadcasting screenshot to other tabs, sender:', senderTabId);
     chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
-      tabs.forEach(tab => {
-        if (tab.id !== senderTabId) {
-          console.log('[Persephone] Sending PASTE_SCREENSHOT to tab:', tab.id, tab.url);
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'PASTE_SCREENSHOT',
-            dataUrl: request.dataUrl
-          }).catch(err => console.error('[Persephone] Failed to send screenshot to tab:', tab.id, err));
-        }
-      });
-      sendResponse({ success: true });
+      const targetTabs = tabs.filter(tab => tab.id !== senderTabId);
+      Promise.all(targetTabs.map((tab) => {
+        console.log('[Persephone] Sending PASTE_SCREENSHOT to tab:', tab.id, tab.url);
+        return sendScreenshotToTabWithRetry(tab, request.dataUrl);
+      }))
+        .then((results) => {
+          const delivered = results.filter(Boolean).length;
+          sendResponse({ success: true, delivered, total: results.length });
+        })
+        .catch((err) => {
+          console.error('[Persephone] Screenshot broadcast failure:', err?.message || err);
+          sendResponse({ success: false, error: err?.message || String(err) });
+        });
     });
     return true;
   }
