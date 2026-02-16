@@ -1515,7 +1515,7 @@
         position: fixed;
         bottom: 176px;
         right: 24px;
-        width: 260px;
+        width: 280px;
         background: #fff;
         border-radius: 12px;
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
@@ -1612,6 +1612,68 @@
       }
       .persephone-panel-toggle input:checked + .persephone-toggle-track::after {
         transform: translateX(16px);
+      }
+
+      /* Tab List Section */
+      .persephone-panel-section {
+        padding: 8px 16px 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .persephone-tab-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 16px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .persephone-tab-row:last-child {
+        border-bottom: none;
+      }
+      .persephone-tab-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1;
+      }
+      .persephone-tab-badge {
+        flex-shrink: 0;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+      }
+      .persephone-tab-badge.claude { background: #d97706; }
+      .persephone-tab-badge.grok { background: #1a1a1a; }
+      .persephone-tab-title {
+        font-size: 12px;
+        color: #1a1a1a;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .persephone-tab-current {
+        font-size: 10px;
+        color: #22c55e;
+        font-weight: 600;
+        flex-shrink: 0;
+        margin-left: 2px;
+      }
+      .persephone-tab-loading {
+        padding: 10px 16px;
+        font-size: 12px;
+        color: #999;
+        text-align: center;
       }
 
       /* Number Input */
@@ -1715,15 +1777,10 @@
   function toggleAutoSend() {
     autoSendFirstChunk = !autoSendFirstChunk;
 
-    // Save to per-site storage key
-    if (isContextValid()) {
-      const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-      chrome.storage.sync.set({ [autoSendKey]: autoSendFirstChunk });
-    }
-
-    // Show indicator
+    // Tab-local only — no storage write, doesn't affect other tabs
     showAutoSendIndicator(autoSendFirstChunk);
-    debug(`⚡ Auto-send toggled: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+    updateWidgetStates();
+    debug(`⚡ Auto-send toggled (this tab): ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
   }
 
   function showAutoSendIndicator(enabled) {
@@ -2267,10 +2324,6 @@
     const extToggle = panel.querySelector('[data-key="extensionEnabled"]');
     if (extToggle) extToggle.checked = extensionEnabled;
 
-    const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-    const autoToggle = panel.querySelector(`[data-key="${autoSendKey}"]`);
-    if (autoToggle) autoToggle.checked = autoSendFirstChunk;
-
     const voiceToggle = panel.querySelector('[data-key="autoSubmitVoice"]');
     if (voiceToggle) voiceToggle.checked = autoSubmitVoice;
 
@@ -2306,15 +2359,13 @@
     header.appendChild(closeBtn);
     panel.appendChild(header);
 
-    // Toggle rows
-    const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-    const rows = [
+    // Simple toggle rows (extension + voice)
+    const simpleRows = [
       { label: 'Extension', key: 'extensionEnabled', get: () => extensionEnabled },
-      { label: `Auto-send (${SITE === 'claude' ? 'Claude' : 'Grok'})`, key: autoSendKey, get: () => autoSendFirstChunk },
       { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => autoSubmitVoice },
     ];
 
-    rows.forEach(({ label, key, get }) => {
+    simpleRows.forEach(({ label, key, get }) => {
       const row = document.createElement('div');
       row.className = 'persephone-panel-row';
 
@@ -2335,20 +2386,11 @@
 
       checkbox.addEventListener('change', () => {
         const val = checkbox.checked;
-
         if (key === 'extensionEnabled') {
           extensionEnabled = val;
           chrome.storage.sync.set({ extensionEnabled: val });
           showExtensionIndicator(val);
-          if (val) {
-            scanAllResponses();
-          } else {
-            removeAllButtons();
-          }
-        } else if (key === autoSendKey) {
-          autoSendFirstChunk = val;
-          chrome.storage.sync.set({ [autoSendKey]: val });
-          showAutoSendIndicator(val);
+          if (val) { scanAllResponses(); } else { removeAllButtons(); }
         } else if (key === 'autoSubmitVoice') {
           autoSubmitVoice = val;
           chrome.storage.sync.set({ autoSubmitVoice: val });
@@ -2359,6 +2401,16 @@
       row.appendChild(toggle);
       panel.appendChild(row);
     });
+
+    // Auto-send tab list section
+    const tabSection = document.createElement('div');
+    tabSection.className = 'persephone-panel-section';
+    tabSection.textContent = 'Auto-send';
+    panel.appendChild(tabSection);
+
+    const tabListContainer = document.createElement('div');
+    tabListContainer.className = 'persephone-tab-list';
+    panel.appendChild(tabListContainer);
 
     // Split threshold row
     const thresholdRow = document.createElement('div');
@@ -2391,6 +2443,78 @@
     thresholdRow.appendChild(thresholdInput);
     panel.appendChild(thresholdRow);
 
+    // Fetch tab list from background and render into the container
+    async function fetchAndRenderTabs() {
+      tabListContainer.innerHTML = '<div class="persephone-tab-loading">Loading...</div>';
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'GET_TAB_LIST' });
+        if (!response?.tabs) {
+          tabListContainer.innerHTML = '<div class="persephone-tab-loading">No tabs found</div>';
+          return;
+        }
+        tabListContainer.innerHTML = '';
+        response.tabs.forEach(tab => {
+          const row = document.createElement('div');
+          row.className = 'persephone-tab-row';
+
+          const info = document.createElement('div');
+          info.className = 'persephone-tab-info';
+
+          const badge = document.createElement('span');
+          badge.className = `persephone-tab-badge ${tab.site}`;
+          badge.textContent = tab.site === 'claude' ? 'C' : 'G';
+
+          const title = document.createElement('span');
+          title.className = 'persephone-tab-title';
+          // Clean up title — remove common suffixes
+          let displayTitle = tab.title.replace(/ [-–—|].*$/, '').trim() || tab.site;
+          if (displayTitle.length > 22) displayTitle = displayTitle.substring(0, 22) + '...';
+          title.textContent = displayTitle;
+
+          info.appendChild(badge);
+          info.appendChild(title);
+
+          if (tab.id === response.currentTabId) {
+            const current = document.createElement('span');
+            current.className = 'persephone-tab-current';
+            current.textContent = '(here)';
+            info.appendChild(current);
+          }
+
+          const toggle = document.createElement('label');
+          toggle.className = 'persephone-panel-toggle';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = tab.autoSend;
+          const track = document.createElement('span');
+          track.className = 'persephone-toggle-track';
+          toggle.appendChild(checkbox);
+          toggle.appendChild(track);
+
+          checkbox.addEventListener('change', () => {
+            if (tab.id === response.currentTabId) {
+              // Current tab — update locally
+              autoSendFirstChunk = checkbox.checked;
+            } else {
+              // Other tab — send via background
+              chrome.runtime.sendMessage({
+                type: 'SET_TAB_AUTO_SEND',
+                tabId: tab.id,
+                autoSend: checkbox.checked
+              });
+            }
+          });
+
+          row.appendChild(info);
+          row.appendChild(toggle);
+          tabListContainer.appendChild(row);
+        });
+      } catch (e) {
+        tabListContainer.innerHTML = '<div class="persephone-tab-loading">Error loading tabs</div>';
+        debug('⚙️ Tab list error:', e.message);
+      }
+    }
+
     // --- Toggle panel on gear click ---
     gearBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2398,6 +2522,7 @@
       if (isHidden) {
         // Sync states before showing
         updateWidgetStates();
+        fetchAndRenderTabs();
         panel.classList.remove('hidden');
       } else {
         panel.classList.add('hidden');
@@ -2458,8 +2583,13 @@
       }
     });
 
-    // Listen for messages from popup
+    // Listen for messages from popup and background
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      // Synchronous response required — must return true
+      if (request.type === 'GET_AUTO_SEND_STATE') {
+        sendResponse({ autoSend: autoSendFirstChunk, site: SITE });
+        return false;
+      }
       if (request.type === 'EXTENSION_ENABLED_CHANGED') {
         extensionEnabled = request.extensionEnabled;
         showExtensionIndicator(extensionEnabled);
@@ -2496,6 +2626,11 @@
         const blob = dataUrlToBlob(request.dataUrl);
         pasteScreenshotIntoChat(blob);
         debug('📸 Screenshot pasted from broadcast');
+      }
+      if (request.type === 'SET_AUTO_SEND_STATE') {
+        autoSendFirstChunk = request.autoSend;
+        showAutoSendIndicator(autoSendFirstChunk);
+        updateWidgetStates();
       }
     });
 

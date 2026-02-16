@@ -209,6 +209,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'GET_TAB_LIST') {
+    const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
+    const senderTabId = sender.tab?.id;
+    chrome.tabs.query({ url: TAB_URLS }, async (tabs) => {
+      const tabList = [];
+      for (const tab of tabs) {
+        try {
+          const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_AUTO_SEND_STATE' });
+          tabList.push({
+            id: tab.id,
+            title: tab.title || '',
+            url: tab.url,
+            autoSend: response?.autoSend ?? true,
+            site: response?.site || (tab.url.includes('claude') ? 'claude' : 'grok')
+          });
+        } catch (e) {
+          tabList.push({
+            id: tab.id,
+            title: tab.title || '',
+            url: tab.url,
+            autoSend: true,
+            site: tab.url.includes('claude') ? 'claude' : 'grok'
+          });
+        }
+      }
+      sendResponse({ tabs: tabList, currentTabId: senderTabId });
+    });
+    return true;
+  }
+
+  if (request.type === 'SET_TAB_AUTO_SEND') {
+    chrome.tabs.sendMessage(request.tabId, {
+      type: 'SET_AUTO_SEND_STATE',
+      autoSend: request.autoSend
+    }).then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.type === 'BROADCAST_SCREENSHOT') {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
