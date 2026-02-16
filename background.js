@@ -15,6 +15,31 @@ let settingsCache = {
   lastLoaded: 0
 };
 
+// Per-tab auto-send overrides (tabId -> boolean)
+// Persisted to chrome.storage.local so they survive service worker restarts
+let tabAutoSendOverrides = {};
+
+async function loadTabOverrides() {
+  try {
+    const data = await chrome.storage.local.get('tabAutoSendOverrides');
+    tabAutoSendOverrides = data.tabAutoSendOverrides || {};
+  } catch (e) {
+    tabAutoSendOverrides = {};
+  }
+}
+
+function saveTabOverrides() {
+  chrome.storage.local.set({ tabAutoSendOverrides });
+}
+
+// Clean up overrides for closed tabs
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId in tabAutoSendOverrides) {
+    delete tabAutoSendOverrides[tabId];
+    saveTabOverrides();
+  }
+});
+
 /**
  * Load settings into memory cache
  */
@@ -215,13 +240,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.tabs.query({ url: TAB_URLS }, async (tabs) => {
       const tabList = [];
       for (const tab of tabs) {
+        // Use persisted override if available, otherwise query the tab
+        const override = tabAutoSendOverrides[tab.id];
         try {
           const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_AUTO_SEND_STATE' });
           tabList.push({
             id: tab.id,
             title: tab.title || '',
             url: tab.url,
-            autoSend: response?.autoSend ?? true,
+            autoSend: override !== undefined ? override : (response?.autoSend ?? true),
             site: response?.site || (tab.url.includes('claude') ? 'claude' : 'grok')
           });
         } catch (e) {
@@ -229,7 +256,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             id: tab.id,
             title: tab.title || '',
             url: tab.url,
-            autoSend: true,
+            autoSend: override !== undefined ? override : true,
             site: tab.url.includes('claude') ? 'claude' : 'grok'
           });
         }
@@ -240,12 +267,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'SET_TAB_AUTO_SEND') {
+    // Persist the override so it survives tab refresh
+    tabAutoSendOverrides[request.tabId] = request.autoSend;
+    saveTabOverrides();
     chrome.tabs.sendMessage(request.tabId, {
       type: 'SET_AUTO_SEND_STATE',
       autoSend: request.autoSend
     }).then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
+  }
+
+  if (request.type === 'GET_TAB_AUTO_SEND') {
+    const tabId = sender.tab?.id;
+    const override = tabId != null ? tabAutoSendOverrides[tabId] : undefined;
+    sendResponse({ hasOverride: override !== undefined, autoSend: override });
+    return false;
+  }
+
+  if (request.type === 'SAVE_OWN_AUTO_SEND') {
+    const tabId = sender.tab?.id;
+    if (tabId != null) {
+      tabAutoSendOverrides[tabId] = request.autoSend;
+      saveTabOverrides();
+    }
+    sendResponse({ success: true });
+    return false;
   }
 
   if (request.type === 'BROADCAST_SCREENSHOT') {
@@ -623,23 +670,24 @@ function splitMessage(text, maxLength) {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[Persephone] Extension installed/updated:', details.reason);
-  
+
   // Set default settings
   const result = await chrome.storage.sync.get(['messageCount', 'botToken', 'chatId']);
   const defaults = {};
   if (result.messageCount === undefined) defaults.messageCount = 0;
-  
+
   if (Object.keys(defaults).length > 0) {
     await chrome.storage.sync.set(defaults);
     console.log('[Persephone] Default settings applied:', defaults);
   }
-  
+
   // Load settings into cache
   await loadSettingsCache();
-  
+  await loadTabOverrides();
+
   // Preconnect to API
   preconnectTelegramAPI();
-  
+
   // Start keep-alive interval
   startConnectionKeepAlive();
 });
@@ -647,13 +695,14 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // Service worker startup (when woken up)
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Persephone] Service worker started');
-  
+
   // Load settings into cache
   await loadSettingsCache();
-  
+  await loadTabOverrides();
+
   // Preconnect to API
   preconnectTelegramAPI();
-  
+
   // Start keep-alive interval
   startConnectionKeepAlive();
 });
@@ -662,6 +711,7 @@ chrome.runtime.onStartup.addListener(async () => {
 (async () => {
   console.log('[Persephone] Initializing...');
   await loadSettingsCache();
+  await loadTabOverrides();
   preconnectTelegramAPI();
   startConnectionKeepAlive();
 })();

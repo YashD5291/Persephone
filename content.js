@@ -1712,6 +1712,18 @@
       autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
       splitThreshold = settings.splitThreshold || 250;
       autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
+
+      // Check for per-tab override (persisted in background)
+      try {
+        const tabOverride = await chrome.runtime.sendMessage({ type: 'GET_TAB_AUTO_SEND' });
+        if (tabOverride?.hasOverride) {
+          autoSendFirstChunk = tabOverride.autoSend;
+          debug(`🔌 Per-tab auto-send override: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+        }
+      } catch (e) {
+        // Background not ready yet, use per-site default
+      }
+
       debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
     } catch (e) {
       debug('Failed to load settings');
@@ -1777,7 +1789,11 @@
   function toggleAutoSend() {
     autoSendFirstChunk = !autoSendFirstChunk;
 
-    // Tab-local only — no storage write, doesn't affect other tabs
+    // Persist per-tab override via background (survives refresh)
+    if (isContextValid()) {
+      chrome.runtime.sendMessage({ type: 'SAVE_OWN_AUTO_SEND', autoSend: autoSendFirstChunk }).catch(() => {});
+    }
+
     showAutoSendIndicator(autoSendFirstChunk);
     updateWidgetStates();
     debug(`⚡ Auto-send toggled (this tab): ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
@@ -1819,17 +1835,49 @@
 
   let micRecording = false;
 
+  function isVisibleElement(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
   /**
    * Find the chat input element, trying the primary selector then fallbacks.
+   * Prefers visible editors so inactive tabs don't select hidden stale nodes.
    */
-  function findChatInput() {
-    let el = document.querySelector(SELECTORS.chatInput);
-    if (el) return el;
-    // Fallback: any ProseMirror contenteditable (both sites use tiptap/ProseMirror)
-    el = document.querySelector('div.ProseMirror[contenteditable="true"]');
-    if (el) return el;
-    el = document.querySelector('[contenteditable="true"]');
-    return el;
+  function findChatInput(options = {}) {
+    const allowHidden = options.allowHidden === true;
+    const selectors = [
+      SELECTORS.chatInput,
+      'div.ProseMirror[contenteditable="true"]',
+      '[contenteditable="true"]'
+    ];
+    const candidates = [];
+    selectors.forEach((selector) => {
+      if (!selector) return;
+      document.querySelectorAll(selector).forEach((el) => candidates.push(el));
+    });
+
+    if (candidates.length === 0) return null;
+
+    const visible = candidates.find((el) => isVisibleElement(el));
+    if (visible) return visible;
+
+    if (allowHidden) return candidates[0];
+    return null;
+  }
+
+  async function findChatInputWithRetry(attempts = 4, delayMs = 120, options = {}) {
+    for (let i = 0; i < attempts; i++) {
+      const input = findChatInput(options);
+      if (input) return input;
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    return null;
   }
 
   /**
@@ -2150,24 +2198,33 @@
    * Paste a screenshot blob into the chat input via synthetic paste event.
    * Also writes to clipboard as fallback (user can Cmd+V).
    */
-  async function pasteScreenshotIntoChat(blob) {
-    const input = findChatInput();
+  async function pasteScreenshotIntoChat(blob, options = {}) {
+    const focusInput = options.focusInput !== false;
+    const writeClipboard = options.writeClipboard !== false;
+    const allowHiddenInput = options.allowHiddenInput === true;
 
-    // 1. Write to clipboard (backup — user can always Cmd+V)
-    try {
-      const clipItem = new ClipboardItem({ 'image/png': blob });
-      await navigator.clipboard.write([clipItem]);
-    } catch (e) {
-      debug('📸 Clipboard write failed:', e.message);
+    // 1. Write to clipboard only from the initiating tab.
+    if (writeClipboard) {
+      try {
+        const clipItem = new ClipboardItem({ 'image/png': blob });
+        await navigator.clipboard.write([clipItem]);
+      } catch (e) {
+        debug('📸 Clipboard write failed:', e.message);
+      }
     }
 
-    if (!input) return;
+    const input = await findChatInputWithRetry(5, 120, { allowHidden: allowHiddenInput });
+    if (!input) {
+      debug('📸 Screenshot paste failed: chat input not found');
+      return false;
+    }
 
-    // 2. Focus the input
-    window.focus();
-    input.focus();
+    // Never force window focus; that can activate another tab.
+    if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
+      input.focus();
+    }
 
-    // 3. Attempt synthetic paste event (works in most ProseMirror setups)
+    // 2. Attempt synthetic paste event (works in most ProseMirror setups)
     try {
       const file = new File([blob], 'screenshot.png', { type: 'image/png' });
       const dt = new DataTransfer();
@@ -2178,8 +2235,10 @@
         clipboardData: dt
       });
       input.dispatchEvent(pasteEvent);
+      return true;
     } catch (e) {
       debug('📸 Synthetic paste failed:', e.message);
+      return false;
     }
   }
 
@@ -2271,7 +2330,10 @@
     }
 
     // Paste into chat
-    await pasteScreenshotIntoChat(blob);
+    await pasteScreenshotIntoChat(blob, {
+      focusInput: true,
+      writeClipboard: true
+    });
 
     // Broadcast to other tabs (paste only, no submit)
     blobToDataUrl(blob).then(dataUrl => {
@@ -2490,16 +2552,17 @@
           toggle.appendChild(track);
 
           checkbox.addEventListener('change', () => {
+            // Always persist via background (survives tab refresh)
+            chrome.runtime.sendMessage({
+              type: 'SET_TAB_AUTO_SEND',
+              tabId: tab.id,
+              autoSend: checkbox.checked
+            });
             if (tab.id === response.currentTabId) {
-              // Current tab — update locally
+              // Also update locally for immediate effect
               autoSendFirstChunk = checkbox.checked;
-            } else {
-              // Other tab — send via background
-              chrome.runtime.sendMessage({
-                type: 'SET_TAB_AUTO_SEND',
-                tabId: tab.id,
-                autoSend: checkbox.checked
-              });
+              showAutoSendIndicator(autoSendFirstChunk);
+              updateWidgetStates();
             }
           });
 
@@ -2622,8 +2685,13 @@
       }
       if (request.type === 'PASTE_SCREENSHOT') {
         const blob = dataUrlToBlob(request.dataUrl);
-        pasteScreenshotIntoChat(blob);
-        debug('📸 Screenshot pasted from broadcast');
+        pasteScreenshotIntoChat(blob, {
+          focusInput: false,
+          writeClipboard: false,
+          allowHiddenInput: true
+        }).then((ok) => {
+          debug(ok ? '📸 Screenshot pasted from broadcast' : '📸 Screenshot broadcast paste failed');
+        });
       }
       if (request.type === 'SET_AUTO_SEND_STATE') {
         autoSendFirstChunk = request.autoSend;
