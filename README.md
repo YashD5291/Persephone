@@ -13,7 +13,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 
 ### Auto-Send First Chunk
 - **Enabled by default** - automatically live-streams the first paragraph/heading when the AI starts responding
-- **Per-tab control** - toggle auto-send independently for each open Grok/Claude tab from the floating settings widget
+- **Per-tab control** - toggle auto-send independently for each open Grok/Claude tab from the floating settings widget. Settings persist across page refreshes
 - Press `Cmd/Ctrl+Shift+A` on page to toggle the current tab's auto-send
 - Visual indicator shows when auto-send is ON/OFF
 - **Skip keywords** - configurable list of words (e.g., `short`, `shorter`, `shrt`) that prevent auto-send when found in the question. Useful for follow-up prompts where you're asking the AI to shorten/rewrite. Edit keywords in the extension popup (comma-separated). Defaults: `short, shorter, shrt, shrtr, shrter`
@@ -47,7 +47,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Uses Chrome Native Messaging to trigger MacWhisper's F5 shortcut via a local Python host
 - MacWhisper transcribes speech and types directly into the focused chat input
 - **Auto-submit**: optionally submits the transcribed text immediately when recording stops (ideal for meetings)
-- **Broadcast to all tabs**: when auto-submit is on, the transcribed question is sent to all open Grok/Claude tabs simultaneously (great for split-view comparison)
+- **Broadcast to all tabs**: when auto-submit is on, the transcribed question is sent to all open Grok/Claude tabs simultaneously without switching your active tab (great for split-view comparison)
 - Keyboard shortcut: `Alt+M` to toggle recording
 - Mic button turns red and pulses while recording
 
@@ -58,7 +58,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Screenshot is copied to clipboard and pasted into the chat input automatically (synthetic paste into ProseMirror)
 - If synthetic paste doesn't work, image is on clipboard — just `Cmd+V`
 - Green dot on camera button indicates an active stream
-- **Broadcast to all tabs** — screenshot is automatically pasted into all other open Grok/Claude tabs (paste only, no submit)
+- **Broadcast to all tabs** — screenshot is queued for all other open Grok/Claude tabs and pasted automatically when you switch to each tab (paste only, no submit, stays on your current tab)
 - **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome)
 - Button sits above the gear icon in the bottom-right floating stack
 
@@ -66,7 +66,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - **Gear button** in the bottom-right corner of Grok/Claude pages — click to open the settings panel
 - **Extension toggle** — enable/disable Persephone without opening the popup
 - **Voice auto-submit toggle** — turn auto-submit on/off directly from the page
-- **Tab list with per-tab auto-send** — shows all open Grok/Claude tabs with their site badge (C/G), title, and individual auto-send toggles
+- **Tab list with per-tab auto-send** — shows all open Grok/Claude tabs with their site badge (C/G), title, and individual auto-send toggles. Per-tab settings persist across page refreshes
 - Current tab marked with "(here)" label
 - **Split threshold** — adjust the sub-chunk split threshold inline
 - Click outside the panel to close it
@@ -201,7 +201,8 @@ Claude restructures its DOM when streaming completes - Persephone handles this b
 │  - Camera button click → getDisplayMedia() → select window         │
 │  - Stream kept open → subsequent clicks capture instantly           │
 │  - Frame drawn to canvas → PNG blob → clipboard + synthetic paste   │
-│  - Blob → dataURL → BROADCAST_SCREENSHOT → all other tabs paste     │
+│  - Blob → dataURL → BROADCAST_SCREENSHOT → queued per tab            │
+│  - Background tabs: deferred paste on visibilitychange               │
 │  - Alt+click or Chrome "Stop sharing" → cleanup stream              │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -347,6 +348,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v4.6** - Per-tab auto-send persistence across refreshes, deferred screenshot paste for background tabs, voice/screenshot broadcasts no longer switch active tab, color-coded toast notifications (green success, red error)
 - **v4.5** - Floating settings widget with gear button, per-tab auto-send management via tab list, inline extension/voice/threshold controls
 - **v4.4** - Screenshot broadcast to all tabs, ImageCapture API for higher-resolution frames
 - **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow

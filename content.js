@@ -16,6 +16,7 @@
   let autoSubmitVoice = false; // Auto-submit transcribed voice input
   let screenshotStream = null;   // Active MediaStream from getDisplayMedia
   let screenshotVideo = null;    // Hidden <video> element for frame capture
+  let pendingScreenshots = [];   // Queued blobs for background tabs (pasted on visibility)
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
@@ -41,6 +42,10 @@
 
   function debug(...args) {
     if (DEBUG) console.log('[Persephone]', ...args);
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // ============================================
@@ -1081,21 +1086,24 @@
     }
   }
 
-  function showToast(message) {
+  function showToast(message, type) {
     const existing = document.querySelector('.persephone-toast');
     if (existing) existing.remove();
-    
+
     const toast = document.createElement('div');
     toast.className = 'persephone-toast';
-    
-    // Success or error styling
-    if (message.startsWith('✓')) {
-      toast.classList.add('persephone-toast-success');
+
+    // Auto-detect type from message content if not explicitly passed
+    if (!type) {
+      const isError = /^(⚠️|Failed|Error|Delete failed|Edit failed)/.test(message)
+        || /failed|error|disconnect/i.test(message);
+      type = isError ? 'error' : 'success';
     }
-    
+    toast.classList.add(type === 'error' ? 'persephone-toast-error' : 'persephone-toast-success');
+
     toast.textContent = message;
     document.body.appendChild(toast);
-    
+
     setTimeout(() => toast.remove(), 3000);
   }
 
@@ -1322,18 +1330,21 @@
         position: fixed;
         top: 20px;
         right: 20px;
-        background: #ef4444;
         color: white;
         padding: 12px 20px;
         border-radius: 8px;
         font-family: system-ui, sans-serif;
         font-size: 14px;
+        font-weight: 600;
         z-index: 9999999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         animation: persephoneSlideIn 0.3s ease;
       }
       .persephone-toast-success {
-        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        background: rgba(74, 158, 108, 0.92);
+      }
+      .persephone-toast-error {
+        background: rgba(190, 80, 70, 0.92);
       }
       
       @keyframes persephoneSlideIn {
@@ -1915,6 +1926,60 @@
     }
   }
 
+  function getComposerRoot(input) {
+    if (!input) return document.body;
+    return input.closest('form') || input.closest('[data-testid*="composer"]') || input.parentElement || document.body;
+  }
+
+  function getAttachmentSignalCount(root) {
+    if (!root) return 0;
+    const selectors = [
+      'img[src^="blob:"]',
+      'img[src^="data:image"]',
+      '[data-testid*="attachment"]',
+      '[data-testid*="image"]',
+      '[aria-label*="Remove image"]',
+      '[aria-label*="Remove attachment"]',
+      '[class*="attachment"]'
+    ];
+    return root.querySelectorAll(selectors.join(',')).length;
+  }
+
+  function dispatchImagePaste(input, blob) {
+    const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    try {
+      input.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertFromPaste',
+        dataTransfer: dt
+      }));
+    } catch (e) {
+      // Some browsers do not accept dataTransfer in InputEvent initializer.
+    }
+    const pasteEvent = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt
+    });
+    input.dispatchEvent(pasteEvent);
+  }
+
+  function dispatchImageDrop(input, blob) {
+    const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const targets = [input, input.closest('form'), document.body].filter(Boolean);
+    const eventInit = { bubbles: true, cancelable: true, dataTransfer: dt };
+    targets.forEach((target) => {
+      target.dispatchEvent(new DragEvent('dragenter', eventInit));
+      target.dispatchEvent(new DragEvent('dragover', eventInit));
+      target.dispatchEvent(new DragEvent('drop', eventInit));
+    });
+  }
+
   /**
    * Try to click the send/submit button. Retries up to maxAttempts
    * since the button may appear after text enters the input.
@@ -2260,35 +2325,32 @@
       debug('📸 Screenshot paste failed: chat input not found');
       return false;
     }
+    const composerRoot = getComposerRoot(input);
+    const beforeSignals = getAttachmentSignalCount(composerRoot);
 
     // Never force window focus; that can activate another tab.
     if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
       input.focus();
+      placeCaretAtEnd(input);
     }
-    placeCaretAtEnd(input);
 
-    // 2. Attempt synthetic paste event (works in most ProseMirror setups)
+    // 2. Attempt synthetic paste event
     try {
-      const file = new File([blob], 'screenshot.png', { type: 'image/png' });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      try {
-        input.dispatchEvent(new InputEvent('beforeinput', {
-          bubbles: true,
-          cancelable: true,
-          inputType: 'insertFromPaste',
-          dataTransfer: dt
-        }));
-      } catch (e) {
-        // Some browsers do not accept dataTransfer in InputEvent initializer.
+      dispatchImagePaste(input, blob);
+      await delay(120);
+      const afterPasteSignals = getAttachmentSignalCount(composerRoot);
+      if (afterPasteSignals > beforeSignals) return true;
+
+      // Claude in inactive tabs often ignores synthetic paste; try drop fallback.
+      if (SITE === 'claude') {
+        dispatchImageDrop(input, blob);
+        await delay(160);
+        const afterDropSignals = getAttachmentSignalCount(composerRoot);
+        if (afterDropSignals > beforeSignals) return true;
       }
-      const pasteEvent = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: dt
-      });
-      input.dispatchEvent(pasteEvent);
-      return true;
+
+      // If we couldn't prove insertion, report failure so background can retry.
+      return false;
     } catch (e) {
       debug('📸 Synthetic paste failed:', e.message);
       return false;
@@ -2676,6 +2738,25 @@
     // Trigger API preconnect immediately
     triggerPreconnect();
 
+    // Paste queued screenshots when tab becomes visible (Claude background tab workaround)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && pendingScreenshots.length > 0) {
+        const queued = pendingScreenshots.splice(0);
+        debug(`📸 Tab visible — pasting ${queued.length} queued screenshot(s)`);
+        // Small delay to let the tab fully activate and framework initialize
+        setTimeout(async () => {
+          for (const blob of queued) {
+            const ok = await pasteScreenshotIntoChat(blob, {
+              focusInput: true,
+              writeClipboard: false
+            });
+            debug(ok ? '📸 Queued screenshot pasted' : '📸 Queued screenshot paste failed');
+            if (ok) showToast('Screenshot pasted');
+          }
+        }, 300);
+      }
+    });
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       // Alt/Option+M - Toggle MacWhisper mic
@@ -2738,12 +2819,20 @@
       }
       if (request.type === 'PASTE_SCREENSHOT') {
         const blob = dataUrlToBlob(request.dataUrl);
+
+        // Background tabs: queue immediately. Synthetic paste is unreliable —
+        // Claude rejects events entirely, Grok accepts them but Chrome throttles
+        // rendering so DOM-based detection fails (causes double-paste).
+        if (document.visibilityState !== 'visible') {
+          pendingScreenshots.push(blob);
+          debug('📸 Screenshot queued — will paste when tab becomes visible');
+          sendResponse({ success: true });
+          return true;
+        }
+
         pasteScreenshotIntoChat(blob, {
-          focusInput: false,
-          writeClipboard: false,
-          allowHiddenInput: true,
-          inputRetryAttempts: 25,
-          inputRetryDelayMs: 200
+          focusInput: true,
+          writeClipboard: false
         }).then((ok) => {
           debug(ok ? '📸 Screenshot pasted from broadcast' : '📸 Screenshot broadcast paste failed');
           sendResponse({ success: ok });
