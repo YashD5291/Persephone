@@ -8,6 +8,8 @@
   let currentStreamingContainer = null;
   let lastContainerCount = 0;
   let autoSentContainers = new WeakSet(); // Track containers that had auto-send
+  let activeStreamingObservers = new WeakSet(); // Track containers with active streaming observers
+  let checkInProgress = false; // Re-entrancy guard for checkForNewResponse
   let sentMessages = new Map(); // Track sent messages: element -> { messageId, text }
   let sentByHash = new Map(); // Track sent messages by text hash -> { messageId, text, isMultiPart }
   let extensionEnabled = true; // Master toggle - enabled by default
@@ -581,37 +583,43 @@
    */
   function checkForNewResponse() {
     if (!extensionEnabled) return;
+    if (checkInProgress) return;
+    checkInProgress = true;
 
-    const containers = document.querySelectorAll(SELECTORS.responseContainer);
-    if (containers.length === 0) return;
+    try {
+      const containers = document.querySelectorAll(SELECTORS.responseContainer);
+      if (containers.length === 0) return;
 
-    const latest = containers[containers.length - 1];
-    const isNewContainer = containers.length > lastContainerCount;
-    const isStreaming = isElementStreaming(latest);
+      const latest = containers[containers.length - 1];
+      const isNewContainer = containers.length > lastContainerCount;
+      const isStreaming = isElementStreaming(latest);
 
-    // Detect new response (container count increased or new streaming on different container)
-    if (isNewContainer || (isStreaming && latest !== currentStreamingContainer)) {
-      lastContainerCount = containers.length;
+      // Detect new response (container count increased or new streaming on different container)
+      if (isNewContainer || (isStreaming && latest !== currentStreamingContainer)) {
+        lastContainerCount = containers.length;
 
-      if (isStreaming) {
-        debug('⚡ Streaming response detected');
-        currentStreamingContainer = latest;
+        if (isStreaming) {
+          debug('⚡ Streaming response detected');
+          currentStreamingContainer = latest;
 
-        // Capture the user question for keyword skip checking
-        const question = getLatestUserQuestion(latest);
-        containerQuestions.set(latest, question);
-        if (question) debug(`📝 Question: "${question.substring(0, 80)}"`);
+          // Capture the user question for keyword skip checking
+          const question = getLatestUserQuestion(latest);
+          containerQuestions.set(latest, question);
+          if (question) debug(`📝 Question: "${question.substring(0, 80)}"`);
 
-        // Warm up connection immediately when streaming starts
-        if (autoSendFirstChunk) {
-          triggerPreconnect();
+          // Warm up connection immediately when streaming starts
+          if (autoSendFirstChunk) {
+            triggerPreconnect();
+          }
+
+          startStreamingObserver(latest);
+        } else {
+          currentStreamingContainer = latest;
+          processContainer(latest);
         }
-
-        startStreamingObserver(latest);
-      } else {
-        currentStreamingContainer = latest;
-        processContainer(latest);
       }
+    } finally {
+      checkInProgress = false;
     }
   }
 
@@ -620,6 +628,7 @@
    */
   function startGlobalObserver() {
     const mainContainer = document.body;
+    let checkScheduled = false;
 
     const observer = new MutationObserver((mutations) => {
       // Quick check if any mutations might contain response content
@@ -649,8 +658,12 @@
         if (shouldCheck) break;
       }
 
-      if (shouldCheck) {
-        checkForNewResponse();
+      if (shouldCheck && !checkScheduled) {
+        checkScheduled = true;
+        queueMicrotask(() => {
+          checkScheduled = false;
+          checkForNewResponse();
+        });
       }
     });
 
@@ -666,6 +679,10 @@
    * Watch a streaming response for new chunks
    */
   function startStreamingObserver(container) {
+    // Prevent duplicate observers on the same container
+    if (activeStreamingObservers.has(container)) return;
+    activeStreamingObservers.add(container);
+
     // Start live streaming the first chunk (runs independently)
     if (extensionEnabled && autoSendFirstChunk && !autoSentContainers.has(container)) {
       startLiveStream(container);
@@ -677,6 +694,7 @@
       if (!isElementStreaming(container)) {
         debug('✅ Streaming complete');
         observer.disconnect();
+        activeStreamingObservers.delete(container);
         setTimeout(() => processContainer(container), 200);
       }
     });
@@ -2927,11 +2945,16 @@
       // Start global observer for immediate detection of new responses
       startGlobalObserver();
 
-      // Fallback polling (fast interval for reliability)
+      // Fallback polling (MutationObserver is primary; this is a safety net)
+      let lastPollCheck = 0;
       setInterval(() => {
-        checkForNewResponse();
         scanAllResponses();
-      }, 200);
+        const now = Date.now();
+        if (now - lastPollCheck >= 2000) {
+          lastPollCheck = now;
+          checkForNewResponse();
+        }
+      }, 2000);
 
       debug('✅ Ready');
     }, 500);

@@ -89,6 +89,17 @@ async function loadSettingsCache() {
 }
 
 /**
+ * Ensure settings are loaded — reloads from storage if botToken or chatId is missing.
+ * Returns true if settings are available, false otherwise.
+ */
+async function ensureSettings() {
+  if (!settingsCache.botToken || !settingsCache.chatId) {
+    await loadSettingsCache();
+  }
+  return !!(settingsCache.botToken && settingsCache.chatId);
+}
+
+/**
  * Update a specific cached setting and persist to storage
  */
 async function updateCachedSetting(key, value) {
@@ -142,15 +153,17 @@ async function preconnectTelegramAPI() {
 
 /**
  * Periodic keep-alive to maintain warm connection
- * Runs every 4 minutes (Telegram timeout is ~5 min)
+ * Uses chrome.alarms to survive service worker termination
  */
 function startConnectionKeepAlive() {
-  setInterval(() => {
-    if (settingsCache.botToken) {
-      preconnectTelegramAPI();
-    }
-  }, 4 * 60 * 1000); // 4 minutes
+  chrome.alarms.create('keepAlive', { periodInMinutes: 4 });
 }
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'keepAlive') {
+    preconnectTelegramAPI();
+  }
+});
 
 // ============================================
 // NATIVE MESSAGING (MacWhisper)
@@ -372,14 +385,8 @@ _Ready to receive messages\\._`;
 }
 
 async function handleSendToTelegram(text) {
-  // Use cached settings (fast!)
-  if (!settingsCache.botToken || !settingsCache.chatId) {
-    // Fallback: try loading from storage
-    await loadSettingsCache();
-    
-    if (!settingsCache.botToken || !settingsCache.chatId) {
-      return { success: false, error: 'Bot token or chat ID not configured. Please set up in extension popup.' };
-    }
+  if (!await ensureSettings()) {
+    return { success: false, error: 'Bot token or chat ID not configured. Please set up in extension popup.' };
   }
 
   const result = await sendTelegramMessage(settingsCache.botToken, settingsCache.chatId, text);
@@ -398,7 +405,7 @@ async function handleSendToTelegram(text) {
  * Handle editing a message in Telegram
  */
 async function handleEditMessage(messageId, newText) {
-  if (!settingsCache.botToken || !settingsCache.chatId) {
+  if (!await ensureSettings()) {
     return { success: false, error: 'Bot token or chat ID not configured.' };
   }
 
@@ -409,7 +416,7 @@ async function handleEditMessage(messageId, newText) {
  * Handle lightweight stream edit - no markdown, ignores "not modified"
  */
 async function handleStreamEdit(messageId, text) {
-  if (!settingsCache.botToken || !settingsCache.chatId) {
+  if (!await ensureSettings()) {
     return { success: false };
   }
 
@@ -441,7 +448,7 @@ async function handleStreamEdit(messageId, text) {
  * Handle deleting a message from Telegram
  */
 async function handleDeleteMessage(messageId) {
-  if (!settingsCache.botToken || !settingsCache.chatId) {
+  if (!await ensureSettings()) {
     return { success: false, error: 'Bot token or chat ID not configured.' };
   }
 
@@ -702,6 +709,19 @@ function splitMessage(text, maxLength) {
 // EXTENSION LIFECYCLE
 // ============================================
 
+let initialized = false;
+
+async function initialize() {
+  if (initialized) return;
+  initialized = true;
+
+  console.log('[Persephone] Initializing...');
+  await loadSettingsCache();
+  await loadTabOverrides();
+  preconnectTelegramAPI();
+  startConnectionKeepAlive();
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[Persephone] Extension installed/updated:', details.reason);
 
@@ -715,40 +735,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('[Persephone] Default settings applied:', defaults);
   }
 
-  // Load settings into cache
-  await loadSettingsCache();
-  await loadTabOverrides();
-
-  // Preconnect to API
-  preconnectTelegramAPI();
-
-  // Start keep-alive interval
-  startConnectionKeepAlive();
+  await initialize();
 });
 
 // Service worker startup (when woken up)
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Persephone] Service worker started');
-
-  // Load settings into cache
-  await loadSettingsCache();
-  await loadTabOverrides();
-
-  // Preconnect to API
-  preconnectTelegramAPI();
-
-  // Start keep-alive interval
-  startConnectionKeepAlive();
+  await initialize();
 });
 
 // Initialize on script load (for when service worker is first loaded)
-(async () => {
-  console.log('[Persephone] Initializing...');
-  await loadSettingsCache();
-  await loadTabOverrides();
-  preconnectTelegramAPI();
-  startConnectionKeepAlive();
-})();
+initialize();
 
 // Handle extension icon click
 chrome.action.onClicked.addListener((tab) => {
