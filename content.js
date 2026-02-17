@@ -53,13 +53,32 @@
   // ============================================
 
   /**
-   * Check if an element is inside Claude's thinking/reasoning section (row-start-1).
-   * Thinking content uses the same .standard-markdown as the actual response,
-   * but lives in the first row of a two-row grid. The actual response is in row-start-2.
+   * Get the response content scope within a streaming container.
+   * Claude thinking models use a grid inside div[data-is-streaming]:
+   *   .row-start-1 = collapsed thinking summary button
+   *   .row-start-2 = response area, which has two .row-start-1 children:
+   *     - z-[2]: actual response content (empty during thinking, fills when response starts)
+   *     - z-[3]: .font-ui tool timeline (web search results, thinking steps)
+   * We need to return ONLY the response content child, not the .font-ui timeline.
+   * Returns null if thinking is active but response content area isn't ready.
    */
-  function isInsideThinkingSection(element) {
-    if (SITE !== 'claude') return false;
-    return !!element.closest('.row-start-1');
+  function getResponseScope(container) {
+    if (SITE !== 'claude') return container;
+    const responseRow = container.querySelector('.row-start-2');
+    if (responseRow) {
+      // Find the child .row-start-1 that does NOT contain .font-ui (tool timeline)
+      for (const child of responseRow.children) {
+        if (child.classList.contains('row-start-1') && !child.querySelector('.font-ui')) {
+          return child;
+        }
+      }
+      // Only .font-ui children — response content not ready yet
+      return null;
+    }
+    // No grid yet — if .row-start-1 exists, thinking has started
+    if (container.querySelector('.row-start-1')) return null;
+    // No grid structure at all — non-thinking model, use container directly
+    return container;
   }
 
   function isContextValid() {
@@ -77,11 +96,11 @@
         return element.getAttribute('data-is-streaming') === 'true';
       }
       // Element-level: only the last content element in a streaming response is "still streaming"
-      // Skip thinking section elements when determining the "last" content element
       const streamingAncestor = element.closest('[data-is-streaming="true"]');
       if (!streamingAncestor) return false;
-      const allContent = Array.from(streamingAncestor.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li'))
-        .filter(el => !isInsideThinkingSection(el));
+      const scope = getResponseScope(streamingAncestor);
+      if (!scope) return false; // Thinking in progress, no response content yet
+      const allContent = Array.from(scope.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li'));
       return allContent.length > 0 && allContent[allContent.length - 1] === element;
     }
     return element.querySelector('.animate-gaussian') !== null;
@@ -446,9 +465,6 @@
     );
     if (hasOwnButton) return false;
 
-    // Skip thinking/reasoning section content (Claude)
-    if (isInsideThinkingSection(element)) return false;
-
     // Skip if still streaming
     if (isElementStreaming(element)) return false;
 
@@ -525,8 +541,12 @@
   function processContainer(container) {
     if (!container || !extensionEnabled) return 0;
 
+    // Scope to response section only (skips thinking content for Claude)
+    const scope = getResponseScope(container);
+    if (!scope) return 0; // Thinking in progress, response not started
+
     // Add buttons to lists (full) and individual list items
-    const elements = container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, li, pre, blockquote, table');
+    const elements = scope.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, li, pre, blockquote, table');
     let count = 0;
 
     elements.forEach(el => {
@@ -706,15 +726,18 @@
       let resolved = false;
       const contentSelector = 'p, h1, h2, h3, h4, h5, h6, pre, blockquote';
 
-      // Find the first content element that isn't inside the thinking section
+      // Find the first content element in the response scope (skips thinking)
       const findContent = () => {
-        const candidates = container.querySelectorAll(contentSelector);
+        const scope = getResponseScope(container);
+        if (!scope) return null; // Thinking in progress, response not started
+        const candidates = scope.querySelectorAll(contentSelector);
         for (const el of candidates) {
-          if (!isInsideThinkingSection(el)) return el;
+          return el;
         }
         return null;
       };
 
+      const startTime = Date.now();
       const check = () => {
         if (resolved) return;
         const el = findContent();
@@ -731,15 +754,15 @@
           resolve(el || null);
           return;
         }
+        // Safety: give up after 120s (thinking + web search can take a while)
+        if (Date.now() - startTime > 120000) {
+          resolved = true;
+          resolve(el || null);
+          return;
+        }
         setTimeout(check, 50);
       };
       check();
-      // Safety: resolve with whatever we have after 10s
-      setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        resolve(findContent());
-      }, 10000);
     });
   }
 
@@ -838,18 +861,19 @@
       const finalText = getFinalText();
       if (!finalText || finalText.length < 5) return;
 
-      // First chunk is always sent in full — no split threshold
-      if (finalText !== lastSentText) {
-        await editInTelegram(messageId, finalText);
-      }
-
-      // Store in maps for edit/delete
+      // Store in maps BEFORE the async edit so DOM rebuild can find sent state
       const msgData = {
         messageId,
         text: finalText,
         isMultiPart: result.isMultiPart
       };
       sentByHash.set(hashText(finalText), msgData);
+
+      // First chunk is always sent in full — no split threshold
+      if (finalText !== lastSentText) {
+        await editInTelegram(messageId, finalText);
+      }
+
       if (firstElement.isConnected) {
         sentMessages.set(firstElement, msgData);
 
