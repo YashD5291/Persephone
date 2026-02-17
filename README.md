@@ -38,6 +38,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 
 ### Smart Content Detection
 - Automatically detects paragraphs (`<p>`), headings (`<h1>`-`<h6>`), lists (`<ul>`, `<ol>`), code blocks (`<pre>`), blockquotes, and tables
+- **Thinking filter** — Claude's thinking/reasoning section is automatically excluded; only the actual response is captured and streamed
 - Preserves Markdown formatting: `*bold*`, `_italic_`, `` `code` ``
 - Handles code blocks with language detection
 - Splits long messages automatically (4096 char Telegram limit)
@@ -154,8 +155,13 @@ COMPLETE:    <p>Hello world</p>  <- Ready to capture!
 **Claude** uses a `data-is-streaming` attribute on response containers:
 ```
 STREAMING:   <div data-is-streaming="true">
-               <div class="progressive-markdown">
-                 <div><div class="standard-markdown"><p>Hello world</p></div></div>
+               <div class="grid grid-rows-[auto_auto]">
+                 <div class="row-start-1">         ← THINKING (filtered out)
+                   <div class="standard-markdown"><p>Reasoning text...</p></div>
+                 </div>
+                 <div class="row-start-2">         ← ACTUAL RESPONSE (captured)
+                   <div class="standard-markdown"><p>Hello world</p></div>
+                 </div>
                </div>
              </div>
 
@@ -166,6 +172,8 @@ COMPLETE:    <div data-is-streaming="false">
                </div></div>
              </div>
 ```
+
+Claude's thinking/reasoning section (`.row-start-1`) uses the same `.standard-markdown` class as the actual response. Persephone filters it out via `isInsideThinkingSection()` so only `.row-start-2` content is captured.
 
 Claude restructures its DOM when streaming completes - Persephone handles this by tracking text anchors and reading from the rebuilt DOM to capture the complete text.
 
@@ -348,7 +356,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
-- **v4.6** - Per-tab auto-send persistence across refreshes, deferred screenshot paste for background tabs, voice/screenshot broadcasts no longer switch active tab, color-coded toast notifications (green success, red error)
+- **v4.6** - Per-tab auto-send persistence across refreshes, deferred screenshot paste for background tabs, voice/screenshot broadcasts no longer switch active tab, color-coded toast notifications, Claude thinking section filter, skip keywords support for Claude
 - **v4.5** - Floating settings widget with gear button, per-tab auto-send management via tab list, inline extension/voice/threshold controls
 - **v4.4** - Screenshot broadcast to all tabs, ImageCapture API for higher-resolution frames
 - **v4.3** - Screenshot capture from other windows via floating camera button, stream-and-capture workflow

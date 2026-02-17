@@ -28,7 +28,7 @@
 
   const SELECTORS = SITE === 'claude' ? {
     responseContainer: 'div[data-is-streaming]',
-    userQuestion: null,
+    userQuestion: '[data-testid="user-message"]',
     cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
     chatInput: 'div.ProseMirror[data-testid="chat-input"]',
     sendButton: 'button[aria-label="Send message"]',
@@ -52,6 +52,16 @@
   // HELPERS
   // ============================================
 
+  /**
+   * Check if an element is inside Claude's thinking/reasoning section (row-start-1).
+   * Thinking content uses the same .standard-markdown as the actual response,
+   * but lives in the first row of a two-row grid. The actual response is in row-start-2.
+   */
+  function isInsideThinkingSection(element) {
+    if (SITE !== 'claude') return false;
+    return !!element.closest('.row-start-1');
+  }
+
   function isContextValid() {
     try {
       return !!chrome.runtime?.id;
@@ -67,9 +77,11 @@
         return element.getAttribute('data-is-streaming') === 'true';
       }
       // Element-level: only the last content element in a streaming response is "still streaming"
+      // Skip thinking section elements when determining the "last" content element
       const streamingAncestor = element.closest('[data-is-streaming="true"]');
       if (!streamingAncestor) return false;
-      const allContent = streamingAncestor.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li');
+      const allContent = Array.from(streamingAncestor.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li'))
+        .filter(el => !isInsideThinkingSection(el));
       return allContent.length > 0 && allContent[allContent.length - 1] === element;
     }
     return element.querySelector('.animate-gaussian') !== null;
@@ -434,6 +446,9 @@
     );
     if (hasOwnButton) return false;
 
+    // Skip thinking/reasoning section content (Claude)
+    if (isInsideThinkingSection(element)) return false;
+
     // Skip if still streaming
     if (isElementStreaming(element)) return false;
 
@@ -689,9 +704,20 @@
   function waitForFirstElement(container, minChars) {
     return new Promise((resolve) => {
       let resolved = false;
+      const contentSelector = 'p, h1, h2, h3, h4, h5, h6, pre, blockquote';
+
+      // Find the first content element that isn't inside the thinking section
+      const findContent = () => {
+        const candidates = container.querySelectorAll(contentSelector);
+        for (const el of candidates) {
+          if (!isInsideThinkingSection(el)) return el;
+        }
+        return null;
+      };
+
       const check = () => {
         if (resolved) return;
-        const el = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+        const el = findContent();
         if (el) {
           const text = extractText(el);
           if (text && text.length >= minChars) {
@@ -712,7 +738,7 @@
       setTimeout(() => {
         if (resolved) return;
         resolved = true;
-        resolve(container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote'));
+        resolve(findContent());
       }, 10000);
     });
   }
