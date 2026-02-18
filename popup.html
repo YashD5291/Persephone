@@ -64,6 +64,12 @@
     </div>
 
     <div class="setting-group">
+      <label class="setting-label" for="firstChunkWordLimit">First chunk split (words)</label>
+      <p class="setting-hint">Auto-streamed first chunk splits into two messages at this word count.</p>
+      <input type="number" id="firstChunkWordLimit" class="setting-number" min="10" max="500" step="1" value="42">
+    </div>
+
+    <div class="setting-group">
       <label class="setting-label" for="splitThreshold">Split threshold (chars)</label>
       <p class="setting-hint">Paragraphs longer than this get two sub-chunk send buttons.</p>
       <input type="number" id="splitThreshold" class="setting-number" min="50" max="2000" step="10" value="250">

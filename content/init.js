@@ -32,6 +32,7 @@
         extensionEnabled: state.extensionEnabled,
         autoSendFirstChunk: state.autoSendFirstChunk,
         splitThreshold: state.splitThreshold,
+        firstChunkWordLimit: state.firstChunkWordLimit,
         autoSubmitVoice: state.autoSubmitVoice,
         autoSendSkipKeywords: state.autoSendSkipKeywords,
       },
@@ -178,6 +179,11 @@
         log.state.debug(`📝 Split threshold updated: ${state.splitThreshold}`);
         updateWidgetStates();
       }
+      if (request.type === MSG.FIRST_CHUNK_WORD_LIMIT_CHANGED) {
+        state.firstChunkWordLimit = request.firstChunkWordLimit || 42;
+        log.state.debug(`📝 First chunk word limit updated: ${state.firstChunkWordLimit}`);
+        updateWidgetStates();
+      }
       if (request.type === MSG.AUTO_SUBMIT_VOICE_CHANGED) {
         state.autoSubmitVoice = request.autoSubmitVoice === true;
         log.voice.debug(`🎙️ Auto-submit voice: ${state.autoSubmitVoice ? 'ON' : 'OFF'}`);
@@ -231,6 +237,9 @@
       }
       if (changes.splitThreshold) {
         state.splitThreshold = changes.splitThreshold.newValue || 250;
+      }
+      if (changes.firstChunkWordLimit) {
+        state.firstChunkWordLimit = changes.firstChunkWordLimit.newValue || 42;
       }
       updateWidgetStates();
     });

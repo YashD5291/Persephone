@@ -25,6 +25,7 @@
     extensionEnabled: true,
     autoSendFirstChunk: true,
     splitThreshold: 250,
+    firstChunkWordLimit: 42,
     autoSubmitVoice: false,
     autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
 

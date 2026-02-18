@@ -15,11 +15,12 @@
 
     try {
       const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'autoSubmitVoice']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice']);
       state.extensionEnabled = settings.extensionEnabled !== false; // Default true
       state.autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
       state.autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
       state.splitThreshold = settings.splitThreshold || 250;
+      state.firstChunkWordLimit = settings.firstChunkWordLimit || 42;
       state.autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
 
       // Check for per-tab override (persisted in background)
@@ -155,6 +156,11 @@
     if (thresholdInput && document.activeElement !== thresholdInput) {
       thresholdInput.value = state.splitThreshold;
     }
+
+    const wordLimitInput = panel.querySelector('[data-key="firstChunkWordLimit"]');
+    if (wordLimitInput && document.activeElement !== wordLimitInput) {
+      wordLimitInput.value = state.firstChunkWordLimit;
+    }
   }
 
   function injectSettingsWidget() {
@@ -266,6 +272,37 @@
     thresholdRow.appendChild(thresholdLabel);
     thresholdRow.appendChild(thresholdInput);
     panel.appendChild(thresholdRow);
+
+    // First chunk word limit row
+    const wordLimitRow = document.createElement('div');
+    wordLimitRow.className = 'persephone-panel-row';
+    const wordLimitLabel = document.createElement('span');
+    wordLimitLabel.className = 'persephone-panel-label';
+    wordLimitLabel.textContent = '1st chunk words';
+    const wordLimitInput = document.createElement('input');
+    wordLimitInput.type = 'number';
+    wordLimitInput.className = 'persephone-panel-input';
+    wordLimitInput.value = state.firstChunkWordLimit;
+    wordLimitInput.min = '10';
+    wordLimitInput.max = '500';
+    wordLimitInput.setAttribute('data-key', 'firstChunkWordLimit');
+
+    let wordLimitDebounce = null;
+    wordLimitInput.addEventListener('input', () => {
+      clearTimeout(wordLimitDebounce);
+      wordLimitDebounce = setTimeout(() => {
+        const val = parseInt(wordLimitInput.value, 10);
+        if (val && val >= 10) {
+          state.firstChunkWordLimit = val;
+          chrome.storage.sync.set({ firstChunkWordLimit: val });
+          log.ui.debug(`📝 First chunk word limit updated: ${val}`);
+        }
+      }, 600);
+    });
+
+    wordLimitRow.appendChild(wordLimitLabel);
+    wordLimitRow.appendChild(wordLimitInput);
+    panel.appendChild(wordLimitRow);
 
     // Fetch tab list from background and render into the container
     async function fetchAndRenderTabs() {

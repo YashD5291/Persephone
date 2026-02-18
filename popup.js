@@ -14,10 +14,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const resetKeywordsBtn = document.getElementById('resetKeywords');
   const keywordsSection = document.getElementById('keywordsSection');
   const splitThresholdInput = document.getElementById('splitThreshold');
+  const firstChunkWordLimitInput = document.getElementById('firstChunkWordLimit');
   const autoSubmitVoiceToggle = document.getElementById('autoSubmitVoiceToggle');
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   const DEFAULT_SPLIT_THRESHOLD = 250;
+  const DEFAULT_FIRST_CHUNK_WORD_LIMIT = 42;
   const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
 
   // Load saved settings
@@ -28,6 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'extensionEnabled',
     'autoSendSkipKeywords',
     'splitThreshold',
+    'firstChunkWordLimit',
     'autoSubmitVoice'
   ]);
 
@@ -35,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settings.chatId) chatIdInput.value = settings.chatId;
   enabledToggle.checked = settings.extensionEnabled !== false; // Default true
   splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
+  firstChunkWordLimitInput.value = settings.firstChunkWordLimit || DEFAULT_FIRST_CHUNK_WORD_LIMIT;
   autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
   messageCount.textContent = settings.messageCount || 0;
 
@@ -203,6 +207,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // First chunk word limit: save on change
+  let wordLimitSaveTimeout = null;
+  firstChunkWordLimitInput.addEventListener('input', () => {
+    clearTimeout(wordLimitSaveTimeout);
+    wordLimitSaveTimeout = setTimeout(saveFirstChunkWordLimit, 600);
+  });
+  firstChunkWordLimitInput.addEventListener('blur', saveFirstChunkWordLimit);
+
+  async function saveFirstChunkWordLimit() {
+    clearTimeout(wordLimitSaveTimeout);
+    const val = parseInt(firstChunkWordLimitInput.value, 10);
+    const firstChunkWordLimit = (val && val >= 10) ? val : DEFAULT_FIRST_CHUNK_WORD_LIMIT;
+    firstChunkWordLimitInput.value = firstChunkWordLimit;
+    await chrome.storage.sync.set({ firstChunkWordLimit });
+
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'FIRST_CHUNK_WORD_LIMIT_CHANGED', firstChunkWordLimit });
+      });
+    });
+  }
+
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.messageCount) {
@@ -218,6 +244,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.splitThreshold !== undefined) {
       splitThresholdInput.value = changes.splitThreshold.newValue || DEFAULT_SPLIT_THRESHOLD;
+    }
+    if (changes.firstChunkWordLimit !== undefined) {
+      firstChunkWordLimitInput.value = changes.firstChunkWordLimit.newValue || DEFAULT_FIRST_CHUNK_WORD_LIMIT;
     }
     if (changes.autoSubmitVoice !== undefined) {
       autoSubmitVoiceToggle.checked = changes.autoSubmitVoice.newValue === true;
