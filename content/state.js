@@ -27,6 +27,8 @@
     splitThreshold: 250,
     firstChunkWordLimit: 42,
     autoSubmitVoice: false,
+    voiceAutoRestart: false,
+    voiceRestartDelay: 3,
     autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
 
     // Streaming detection

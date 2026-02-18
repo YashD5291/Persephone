@@ -16,10 +16,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const splitThresholdInput = document.getElementById('splitThreshold');
   const firstChunkWordLimitInput = document.getElementById('firstChunkWordLimit');
   const autoSubmitVoiceToggle = document.getElementById('autoSubmitVoiceToggle');
+  const voiceAutoRestartToggle = document.getElementById('voiceAutoRestartToggle');
+  const voiceRestartDelayInput = document.getElementById('voiceRestartDelay');
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   const DEFAULT_SPLIT_THRESHOLD = 250;
   const DEFAULT_FIRST_CHUNK_WORD_LIMIT = 42;
+  const DEFAULT_VOICE_RESTART_DELAY = 3;
   const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
 
   // Load saved settings
@@ -31,7 +34,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     'autoSendSkipKeywords',
     'splitThreshold',
     'firstChunkWordLimit',
-    'autoSubmitVoice'
+    'autoSubmitVoice',
+    'voiceAutoRestart',
+    'voiceRestartDelay'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
@@ -40,6 +45,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   splitThresholdInput.value = settings.splitThreshold || DEFAULT_SPLIT_THRESHOLD;
   firstChunkWordLimitInput.value = settings.firstChunkWordLimit || DEFAULT_FIRST_CHUNK_WORD_LIMIT;
   autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
+  voiceAutoRestartToggle.checked = settings.voiceAutoRestart === true; // Default false
+  voiceRestartDelayInput.value = settings.voiceRestartDelay || DEFAULT_VOICE_RESTART_DELAY;
   messageCount.textContent = settings.messageCount || 0;
 
   // Load skip keywords
@@ -156,6 +163,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // Voice auto-restart toggle change
+  voiceAutoRestartToggle.addEventListener('change', async () => {
+    const voiceAutoRestart = voiceAutoRestartToggle.checked;
+    await chrome.storage.sync.set({ voiceAutoRestart });
+
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'VOICE_AUTO_RESTART_CHANGED', voiceAutoRestart });
+      });
+    });
+  });
+
+  // Voice restart delay: save on change
+  let restartDelaySaveTimeout = null;
+  voiceRestartDelayInput.addEventListener('input', () => {
+    clearTimeout(restartDelaySaveTimeout);
+    restartDelaySaveTimeout = setTimeout(saveVoiceRestartDelay, 600);
+  });
+  voiceRestartDelayInput.addEventListener('blur', saveVoiceRestartDelay);
+
+  async function saveVoiceRestartDelay() {
+    clearTimeout(restartDelaySaveTimeout);
+    const val = parseInt(voiceRestartDelayInput.value, 10);
+    const voiceRestartDelay = (val && val >= 1) ? val : DEFAULT_VOICE_RESTART_DELAY;
+    voiceRestartDelayInput.value = voiceRestartDelay;
+    await chrome.storage.sync.set({ voiceRestartDelay });
+
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'VOICE_RESTART_DELAY_CHANGED', voiceRestartDelay });
+      });
+    });
+  }
+
   // Keywords: save on blur (when user finishes editing)
   let keywordsSaveTimeout = null;
   skipKeywordsInput.addEventListener('input', () => {
@@ -250,6 +291,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.autoSubmitVoice !== undefined) {
       autoSubmitVoiceToggle.checked = changes.autoSubmitVoice.newValue === true;
+    }
+    if (changes.voiceAutoRestart !== undefined) {
+      voiceAutoRestartToggle.checked = changes.voiceAutoRestart.newValue === true;
+    }
+    if (changes.voiceRestartDelay !== undefined) {
+      voiceRestartDelayInput.value = changes.voiceRestartDelay.newValue || DEFAULT_VOICE_RESTART_DELAY;
     }
   });
 });

@@ -251,6 +251,12 @@
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
           submitChatInput();
+
+          // Auto-restart mic after a delay if enabled
+          if (state.voiceAutoRestart) {
+            log.voice(`🎙️ Auto-restart in ${state.voiceRestartDelay}s`);
+            setTimeout(() => handleMicClick(), state.voiceRestartDelay * 1000);
+          }
         }
       }
     }, POLL_MS);

@@ -34,6 +34,8 @@
         splitThreshold: state.splitThreshold,
         firstChunkWordLimit: state.firstChunkWordLimit,
         autoSubmitVoice: state.autoSubmitVoice,
+        voiceAutoRestart: state.voiceAutoRestart,
+        voiceRestartDelay: state.voiceRestartDelay,
         autoSendSkipKeywords: state.autoSendSkipKeywords,
       },
 
@@ -189,6 +191,16 @@
         log.voice.debug(`🎙️ Auto-submit voice: ${state.autoSubmitVoice ? 'ON' : 'OFF'}`);
         updateWidgetStates();
       }
+      if (request.type === MSG.VOICE_AUTO_RESTART_CHANGED) {
+        state.voiceAutoRestart = request.voiceAutoRestart === true;
+        log.voice.debug(`🎙️ Voice auto-restart: ${state.voiceAutoRestart ? 'ON' : 'OFF'}`);
+        updateWidgetStates();
+      }
+      if (request.type === MSG.VOICE_RESTART_DELAY_CHANGED) {
+        state.voiceRestartDelay = request.voiceRestartDelay || 3;
+        log.voice.debug(`🎙️ Voice restart delay: ${state.voiceRestartDelay}s`);
+        updateWidgetStates();
+      }
       if (request.type === MSG.INSERT_AND_SUBMIT) {
         insertTextAndSubmit(request.text, { focusInput: false });
       }
@@ -234,6 +246,12 @@
       }
       if (changes.autoSubmitVoice) {
         state.autoSubmitVoice = changes.autoSubmitVoice.newValue === true;
+      }
+      if (changes.voiceAutoRestart) {
+        state.voiceAutoRestart = changes.voiceAutoRestart.newValue === true;
+      }
+      if (changes.voiceRestartDelay) {
+        state.voiceRestartDelay = changes.voiceRestartDelay.newValue || 3;
       }
       if (changes.splitThreshold) {
         state.splitThreshold = changes.splitThreshold.newValue || 250;

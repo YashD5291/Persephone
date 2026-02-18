@@ -56,6 +56,23 @@
       </label>
     </div>
 
+    <div class="toggle-group">
+      <div class="toggle-info">
+        <span class="toggle-label">Auto-restart mic</span>
+        <span class="toggle-hint">Re-activate mic after voice submit</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="voiceAutoRestartToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-group">
+      <label class="setting-label" for="voiceRestartDelay">Mic restart delay (seconds)</label>
+      <p class="setting-hint">Wait this many seconds before re-activating the mic.</p>
+      <input type="number" id="voiceRestartDelay" class="setting-number" min="1" max="30" step="1" value="3">
+    </div>
+
     <div class="keywords-section" id="keywordsSection">
       <label class="keywords-label">Skip auto-send keywords</label>
       <p class="keywords-hint">Questions containing these words won't auto-send the first chunk. Comma-separated.</p>

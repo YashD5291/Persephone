@@ -15,13 +15,15 @@
 
     try {
       const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice', 'voiceAutoRestart', 'voiceRestartDelay']);
       state.extensionEnabled = settings.extensionEnabled !== false; // Default true
       state.autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
       state.autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
       state.splitThreshold = settings.splitThreshold || 250;
       state.firstChunkWordLimit = settings.firstChunkWordLimit || 42;
       state.autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
+      state.voiceAutoRestart = settings.voiceAutoRestart === true; // Default false
+      state.voiceRestartDelay = settings.voiceRestartDelay || 3;
 
       // Check for per-tab override (persisted in background)
       try {
@@ -152,6 +154,14 @@
     const voiceToggle = panel.querySelector('[data-key="autoSubmitVoice"]');
     if (voiceToggle) voiceToggle.checked = state.autoSubmitVoice;
 
+    const restartToggle = panel.querySelector('[data-key="voiceAutoRestart"]');
+    if (restartToggle) restartToggle.checked = state.voiceAutoRestart;
+
+    const restartDelayInput = panel.querySelector('[data-key="voiceRestartDelay"]');
+    if (restartDelayInput && document.activeElement !== restartDelayInput) {
+      restartDelayInput.value = state.voiceRestartDelay;
+    }
+
     const thresholdInput = panel.querySelector('[data-key="splitThreshold"]');
     if (thresholdInput && document.activeElement !== thresholdInput) {
       thresholdInput.value = state.splitThreshold;
@@ -193,6 +203,7 @@
     const simpleRows = [
       { label: 'Extension', key: 'extensionEnabled', get: () => state.extensionEnabled },
       { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => state.autoSubmitVoice },
+      { label: 'Voice auto-restart', key: 'voiceAutoRestart', get: () => state.voiceAutoRestart },
     ];
 
     simpleRows.forEach(({ label, key, get }) => {
@@ -224,6 +235,9 @@
         } else if (key === 'autoSubmitVoice') {
           state.autoSubmitVoice = val;
           chrome.storage.sync.set({ autoSubmitVoice: val });
+        } else if (key === 'voiceAutoRestart') {
+          state.voiceAutoRestart = val;
+          chrome.storage.sync.set({ voiceAutoRestart: val });
         }
       });
 
@@ -303,6 +317,37 @@
     wordLimitRow.appendChild(wordLimitLabel);
     wordLimitRow.appendChild(wordLimitInput);
     panel.appendChild(wordLimitRow);
+
+    // Voice restart delay row
+    const restartDelayRow = document.createElement('div');
+    restartDelayRow.className = 'persephone-panel-row';
+    const restartDelayLabel = document.createElement('span');
+    restartDelayLabel.className = 'persephone-panel-label';
+    restartDelayLabel.textContent = 'Restart delay (s)';
+    const restartDelayInput = document.createElement('input');
+    restartDelayInput.type = 'number';
+    restartDelayInput.className = 'persephone-panel-input';
+    restartDelayInput.value = state.voiceRestartDelay;
+    restartDelayInput.min = '1';
+    restartDelayInput.max = '30';
+    restartDelayInput.setAttribute('data-key', 'voiceRestartDelay');
+
+    let restartDelayDebounce = null;
+    restartDelayInput.addEventListener('input', () => {
+      clearTimeout(restartDelayDebounce);
+      restartDelayDebounce = setTimeout(() => {
+        const val = parseInt(restartDelayInput.value, 10);
+        if (val && val >= 1) {
+          state.voiceRestartDelay = val;
+          chrome.storage.sync.set({ voiceRestartDelay: val });
+          log.ui.debug(`📝 Voice restart delay updated: ${val}s`);
+        }
+      }, 600);
+    });
+
+    restartDelayRow.appendChild(restartDelayLabel);
+    restartDelayRow.appendChild(restartDelayInput);
+    panel.appendChild(restartDelayRow);
 
     // Fetch tab list from background and render into the container
     async function fetchAndRenderTabs() {
