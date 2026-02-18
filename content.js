@@ -24,7 +24,58 @@
   let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
   let containerQuestions = new WeakMap(); // container -> question text at time of streaming start
 
-  const DEBUG = true;
+  // ============================================
+  // STRUCTURED LOGGER
+  // ============================================
+
+  const LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
+  const LOG_LEVEL = 'debug';
+
+  const logBuffer = [];
+  const LOG_BUFFER_MAX = 200;
+
+  function createLogger() {
+    const categories = ['streaming', 'selectors', 'telegram', 'state', 'ui', 'voice', 'screenshot', 'init'];
+    const logger = {};
+
+    function emit(category, level, args) {
+      const entry = {
+        ts: Date.now(),
+        cat: category,
+        lvl: level,
+        msg: args.map(a => {
+          if (a === undefined) return 'undefined';
+          if (a === null) return 'null';
+          if (typeof a === 'object') { try { return JSON.stringify(a); } catch { return String(a); } }
+          return String(a);
+        }).join(' ')
+      };
+      logBuffer.push(entry);
+      if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
+
+      if (LOG_LEVELS[level] <= LOG_LEVELS[LOG_LEVEL]) {
+        const prefix = `[Persephone:${category}]`;
+        const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+        fn(prefix, ...args);
+      }
+    }
+
+    categories.forEach(cat => {
+      const logFn = (...args) => emit(cat, 'info', args);
+      logFn.debug = (...args) => emit(cat, 'debug', args);
+      logFn.info = (...args) => emit(cat, 'info', args);
+      logFn.warn = (...args) => emit(cat, 'warn', args);
+      logFn.error = (...args) => emit(cat, 'error', args);
+      logger[cat] = logFn;
+    });
+
+    logger.getBuffer = () => [...logBuffer];
+    logger.getRecent = (n = 50) => logBuffer.slice(-n);
+
+    return logger;
+  }
+
+  const log = createLogger();
 
   const SITE = window.location.hostname.includes('claude.ai') ? 'claude' : 'grok';
 
@@ -42,12 +93,81 @@
     sendButton: 'button[aria-label="Submit"]',
   };
 
-  function debug(...args) {
-    if (DEBUG) console.log('[Persephone]', ...args);
-  }
-
   function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ============================================
+  // SELECTOR HEALTH CHECKS
+  // ============================================
+
+  /**
+   * Run health checks on all critical selectors.
+   * Returns { ok: boolean, results: Array<{ name, selector, count, critical, ok }> }
+   * Called on init and periodically to detect site-side DOM changes.
+   */
+  function runSelectorHealthCheck() {
+    const checks = [];
+
+    // Check each SELECTORS entry
+    for (const [name, selector] of Object.entries(SELECTORS)) {
+      const count = document.querySelectorAll(selector).length;
+      checks.push({ name, selector, count, critical: false, ok: count > 0 });
+    }
+
+    // Site-specific structural selectors (critical for core functionality)
+    const structural = SITE === 'claude' ? [
+      { name: 'claude:streaming-container', selector: 'div[data-is-streaming]', critical: true },
+      { name: 'claude:markdown-content', selector: '.standard-markdown, .progressive-markdown', critical: false },
+      { name: 'claude:font-response', selector: '.font-claude-response', critical: false },
+    ] : [
+      { name: 'grok:response-markdown', selector: '.response-content-markdown', critical: true },
+      { name: 'grok:streaming-indicator', selector: '.animate-gaussian', critical: false },
+      { name: 'grok:user-bubble', selector: '.message-bubble', critical: false },
+    ];
+
+    for (const { name, selector, critical } of structural) {
+      const count = document.querySelectorAll(selector).length;
+      checks.push({ name, selector, count, critical, ok: count > 0 });
+    }
+
+    const allOk = checks.every(c => c.ok);
+
+    // Log results
+    for (const c of checks) {
+      if (c.ok) {
+        log.selectors.debug(`✔ ${c.name}: ${c.count} matches`);
+      } else {
+        const level = c.critical ? 'warn' : 'debug';
+        log.selectors[level](`✗ ${c.name}: 0 matches (${c.selector})`);
+      }
+    }
+
+    return { ok: allOk, results: checks };
+  }
+
+  /**
+   * Run health check and show toast if critical selectors are broken.
+   * Only warns once per session to avoid spam.
+   */
+  let _healthCheckWarned = false;
+
+  function healthCheckWithToast() {
+    const { ok, results } = runSelectorHealthCheck();
+    const criticalFailures = results.filter(c => c.critical && !c.ok);
+
+    if (criticalFailures.length > 0 && !_healthCheckWarned) {
+      // Only warn if the page has loaded enough content to expect matches
+      const hasContent = document.querySelectorAll('p, h1, h2, pre').length > 3;
+      if (hasContent) {
+        _healthCheckWarned = true;
+        const names = criticalFailures.map(c => c.name).join(', ');
+        log.selectors.warn(`Critical selector failures: ${names}`);
+        showToast(`Persephone: DOM structure may have changed (${names})`, 'error');
+      }
+    }
+
+    return ok;
   }
 
   // ============================================
@@ -483,7 +603,7 @@
       sentMessages.set(element, msgData);
       const btnGroup = createActionButtonGroup(element);
       element.appendChild(btnGroup);
-      debug(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
+      log.state(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
       return true;
     }
 
@@ -519,7 +639,7 @@
 
       if (!seenTexts.has(hash)) {
         seenTexts.add(hash);
-        debug(`✅ <${element.tagName.toLowerCase()}> (split): ${text.substring(0, 50)}...`);
+        log.ui.debug(`✅ <${element.tagName.toLowerCase()}> (split): ${text.substring(0, 50)}...`);
       }
 
       return true;
@@ -531,7 +651,7 @@
 
     if (!seenTexts.has(hash)) {
       seenTexts.add(hash);
-      debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
+      log.ui.debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
     }
 
     return true;
@@ -572,7 +692,7 @@
     });
 
     if (totalAdded > 0) {
-      debug(`📦 Added ${totalAdded} buttons`);
+      log.ui.debug(`📦 Added ${totalAdded} buttons`);
     }
 
     return totalAdded;
@@ -599,13 +719,13 @@
         lastContainerCount = containers.length;
 
         if (isStreaming) {
-          debug('⚡ Streaming response detected');
+          log.streaming('⚡ Streaming response detected');
           currentStreamingContainer = latest;
 
           // Capture the user question for keyword skip checking
           const question = getLatestUserQuestion(latest);
           containerQuestions.set(latest, question);
-          if (question) debug(`📝 Question: "${question.substring(0, 80)}"`);
+          if (question) log.streaming(`📝 Question: "${question.substring(0, 80)}"`);
 
           // Warm up connection immediately when streaming starts
           if (autoSendFirstChunk) {
@@ -672,7 +792,7 @@
       subtree: true
     });
 
-    debug('👁️ Global observer started');
+    log.ui('👁️ Global observer started');
   }
 
   /**
@@ -692,7 +812,7 @@
       processContainer(container);
 
       if (!isElementStreaming(container)) {
-        debug('✅ Streaming complete');
+        log.streaming('✅ Streaming complete');
         observer.disconnect();
         activeStreamingObservers.delete(container);
         setTimeout(() => processContainer(container), 200);
@@ -792,7 +912,7 @@
     // Check skip keywords
     const question = containerQuestions.get(container) || '';
     if (shouldSkipAutoSend(question)) {
-      debug('⏭️ Skipping live stream: keyword match');
+      log.streaming('⏭️ Skipping live stream: keyword match');
       autoSentContainers.add(container);
       return;
     }
@@ -803,7 +923,7 @@
     // Wait for first content element with enough text
     const firstElement = await waitForFirstElement(container, 10);
     if (!firstElement) {
-      debug('⚠️ Live stream: no content element found');
+      log.streaming.warn('⚠️ Live stream: no content element found');
       return;
     }
 
@@ -811,16 +931,16 @@
     if (!lastSentText || lastSentText.length < 5) return;
 
     // Send initial text
-    debug('📡 Live stream: sending initial text...');
+    log.streaming('📡 Live stream: sending initial text...');
     const result = await sendToTelegram(lastSentText);
 
     if (!result.success) {
-      debug('⚠️ Live stream: initial send failed');
+      log.streaming.warn('⚠️ Live stream: initial send failed');
       return;
     }
 
     const messageId = Array.isArray(result.messageId) ? result.messageId[0] : result.messageId;
-    debug(`📡 Live stream: started (msgId: ${messageId})`);
+    log.streaming(`📡 Live stream: started (msgId: ${messageId})`);
 
     // Show streaming indicator on the element
     firstElement.style.position = 'relative';
@@ -902,7 +1022,7 @@
         firstElement.appendChild(btnGroup);
       }
 
-      debug('📡 Live stream: finalized');
+      log.streaming('📡 Live stream: finalized');
       showToast('✓ Streamed first chunk');
     };
 
@@ -1060,7 +1180,7 @@
     
     try {
       chrome.runtime.sendMessage({ type: 'PRECONNECT' });
-      debug('🔌 Preconnect triggered');
+      log.telegram('🔌 Preconnect triggered');
     } catch (e) {
       // Ignore errors
     }
@@ -1079,19 +1199,19 @@
       });
       
       if (response?.success) {
-        debug('✔ Sent to Telegram, messageId:', response.messageId);
+        log.telegram('✔ Sent to Telegram, messageId:', response.messageId);
         return { 
           success: true, 
           messageId: response.messageId,
           isMultiPart: response.isMultiPart
         };
       } else {
-        debug('✗ Send failed:', response?.error);
+        log.telegram.error('✗ Send failed:', response?.error);
         showToast(`Failed: ${response?.error || 'Unknown error'}`);
         return { success: false };
       }
     } catch (error) {
-      debug('✗ Error:', error.message);
+      log.telegram.error('✗ Error:', error.message);
       if (error.message?.includes('Extension context invalidated')) {
         showToast('⚠️ Extension disconnected. Please refresh the page.');
       }
@@ -1113,15 +1233,15 @@
       });
       
       if (response?.success) {
-        debug('✔ Message edited');
+        log.telegram('✔ Message edited');
         return true;
       } else {
-        debug('✗ Edit failed:', response?.error);
+        log.telegram.error('✗ Edit failed:', response?.error);
         showToast(`Edit failed: ${response?.error || 'Unknown error'}`);
         return false;
       }
     } catch (error) {
-      debug('✗ Edit error:', error.message);
+      log.telegram.error('✗ Edit error:', error.message);
       showToast('⚠️ Failed to edit message');
       return false;
     }
@@ -1140,15 +1260,15 @@
       });
       
       if (response?.success) {
-        debug('✔ Message deleted');
+        log.telegram('✔ Message deleted');
         return true;
       } else {
-        debug('✗ Delete failed:', response?.error);
+        log.telegram.error('✗ Delete failed:', response?.error);
         showToast(`Delete failed: ${response?.error || 'Unknown error'}`);
         return false;
       }
     } catch (error) {
-      debug('✗ Delete error:', error.message);
+      log.telegram.error('✗ Delete error:', error.message);
       showToast('⚠️ Failed to delete message');
       return false;
     }
@@ -1797,15 +1917,15 @@
         const tabOverride = await chrome.runtime.sendMessage({ type: 'GET_TAB_AUTO_SEND' });
         if (tabOverride?.hasOverride) {
           autoSendFirstChunk = tabOverride.autoSend;
-          debug(`🔌 Per-tab auto-send override: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+          log.state(`🔌 Per-tab auto-send override: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
         }
       } catch (e) {
         // Background not ready yet, use per-site default
       }
 
-      debug(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
+      log.state(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
     } catch (e) {
-      debug('Failed to load settings');
+      log.state.error('Failed to load settings');
     }
   }
 
@@ -1828,7 +1948,7 @@
       removeAllButtons();
     }
 
-    debug(`🔌 Extension toggled: ${extensionEnabled ? 'ON' : 'OFF'}`);
+    log.state(`🔌 Extension toggled: ${extensionEnabled ? 'ON' : 'OFF'}`);
   }
 
   function showExtensionIndicator(enabled) {
@@ -1862,7 +1982,7 @@
 
   function removeAllButtons() {
     document.querySelectorAll('.persephone-inline-btn, .persephone-btn-group').forEach(el => el.remove());
-    debug('🧹 Removed all buttons');
+    log.ui('🧹 Removed all buttons');
   }
 
   function toggleAutoSend() {
@@ -1875,7 +1995,7 @@
 
     showAutoSendIndicator(autoSendFirstChunk);
     updateWidgetStates();
-    debug(`⚡ Auto-send toggled (this tab): ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+    log.state(`⚡ Auto-send toggled (this tab): ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
   }
 
   function showAutoSendIndicator(enabled) {
@@ -2059,7 +2179,7 @@
     const sendBtn = document.querySelector(SELECTORS.sendButton);
     if (sendBtn && !sendBtn.disabled && sendBtn.offsetParent !== null) {
       sendBtn.click();
-      debug('🎙️ Submit: clicked send button');
+      log.voice('🎙️ Submit: clicked send button');
       showToast('Voice message sent');
       return;
     }
@@ -2069,7 +2189,7 @@
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.click();
-      debug('🎙️ Submit: force-clicked send button');
+      log.voice('🎙️ Submit: force-clicked send button');
       showToast('Voice message sent');
       return;
     }
@@ -2080,11 +2200,11 @@
       if (form) {
         try {
           form.requestSubmit();
-          debug('🎙️ Submit: form.requestSubmit()');
+          log.voice('🎙️ Submit: form.requestSubmit()');
           showToast('Voice message sent');
           return;
         } catch (e) {
-          debug('🎙️ Submit: requestSubmit failed:', e.message);
+          log.voice.warn('🎙️ Submit: requestSubmit failed:', e.message);
         }
       }
     }
@@ -2095,10 +2215,10 @@
       input.dispatchEvent(new KeyboardEvent('keydown', props));
       input.dispatchEvent(new KeyboardEvent('keypress', props));
       input.dispatchEvent(new KeyboardEvent('keyup', props));
-      debug('🎙️ Submit: dispatched Enter key sequence');
+      log.voice('🎙️ Submit: dispatched Enter key sequence');
       showToast('Voice message sent');
     } else {
-      debug('🎙️ Submit: failed — no input or button found');
+      log.voice.warn('🎙️ Submit: failed — no input or button found');
     }
   }
 
@@ -2120,12 +2240,12 @@
    */
   function watchForTranscription(inputBefore) {
     if (!findChatInput()) {
-      debug('🎙️ Cannot watch — chat input not found');
+      log.voice.warn('🎙️ Cannot watch — chat input not found');
       return;
     }
 
     const POLL_MS = 50;
-    debug('🎙️ Watching input for transcription (polling)...');
+    log.voice('🎙️ Watching input for transcription (polling)...');
 
     const pollInterval = setInterval(() => {
       // Re-find input each poll (DOM may rebuild after tab switch)
@@ -2138,17 +2258,17 @@
         // New text detected — fire immediately
         clearInterval(pollInterval);
         const transcription = inputBefore ? current.replace(inputBefore, '').trim() : current;
-        console.log('[Persephone] TRANSCRIPTION:', transcription);
-        debug('🎙️ Transcription:', transcription);
+        log.voice('TRANSCRIPTION:', transcription);
+        log.voice('🎙️ Transcription:', transcription);
 
         // Broadcast to other Grok/Claude tabs BEFORE submitting locally
-        debug('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
+        log.voice('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
         try {
           chrome.runtime.sendMessage({ type: 'BROADCAST_QUESTION', text: current })
-            .then(r => debug('🎙️ Broadcast response:', r))
-            .catch(err => debug('🎙️ Broadcast error:', err));
+            .then(r => log.voice('🎙️ Broadcast response:', r))
+            .catch(err => log.voice.error('🎙️ Broadcast error:', err));
         } catch (e) {
-          debug('🎙️ Broadcast send threw:', e);
+          log.voice.error('🎙️ Broadcast send threw:', e);
         }
 
         if (autoSubmitVoice) {
@@ -2168,8 +2288,8 @@
       if (input) {
         const final = getInputValue(input).trim();
         if (final && final !== inputBefore) {
-          console.log('[Persephone] TRANSCRIPTION (timeout):', final);
-          debug('🎙️ Transcription (timeout):', final);
+          log.voice('TRANSCRIPTION (timeout):', final);
+          log.voice('🎙️ Transcription (timeout):', final);
         }
       }
     }, 30000);
@@ -2182,10 +2302,10 @@
    */
   function insertTextAndSubmit(text, options = {}) {
     const focusInput = options.focusInput === true;
-    debug('🎙️ Broadcast received:', text.substring(0, 50));
+    log.voice('🎙️ Broadcast received:', text.substring(0, 50));
     const input = findChatInput();
     if (!input) {
-      debug('🎙️ Broadcast: no chat input found');
+      log.voice.warn('🎙️ Broadcast: no chat input found');
       return;
     }
 
@@ -2206,12 +2326,12 @@
         document.execCommand('delete');
         inserted = document.execCommand('insertText', false, text);
       } catch (e) {
-        debug('🎙️ execCommand failed:', e.message);
+        log.voice.warn('🎙️ execCommand failed:', e.message);
       }
 
       // Check if execCommand actually inserted text
       if (!inserted || !getInputValue(input).trim()) {
-        debug('🎙️ execCommand did not work, using innerHTML fallback');
+        log.voice('🎙️ execCommand did not work, using innerHTML fallback');
         // Direct DOM manipulation — ProseMirror's DOMObserver picks up mutations
         input.innerHTML = '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>';
         inserted = true;
@@ -2229,7 +2349,7 @@
         input.focus();
       }
       submitChatInput();
-      debug('🎙️ Broadcast: submitted');
+      log.voice('🎙️ Broadcast: submitted');
     }, 100);
   }
 
@@ -2256,10 +2376,10 @@
         micRecording = true;
         micBtn.classList.add('recording');
         if (input) input.focus();
-        debug('🎙️ Recording started');
+        log.voice('🎙️ Recording started');
       } else {
         showToast('Failed to start MacWhisper');
-        debug('🎙️ Start failed:', result?.error);
+        log.voice.error('🎙️ Start failed:', result?.error);
       }
     } else {
       // Stopping recording — capture what's in the input before MacWhisper types
@@ -2272,7 +2392,7 @@
 
       // Re-focus input so MacWhisper types into it
       if (input) input.focus();
-      debug('🎙️ Recording stopped, input focused, polling for transcription...');
+      log.voice('🎙️ Recording stopped, input focused, polling for transcription...');
 
       // Poll the input for MacWhisper's typing
       watchForTranscription(inputBefore);
@@ -2298,7 +2418,7 @@
     btn.addEventListener('click', handleMicClick);
 
     document.body.appendChild(btn);
-    debug('🎙️ Mic button injected');
+    log.voice('🎙️ Mic button injected');
   }
 
   // ============================================
@@ -2344,7 +2464,7 @@
     try {
       const imageCapture = new ImageCapture(track);
       const bitmap = await imageCapture.grabFrame();
-      debug(`📸 Capture resolution: ${bitmap.width}×${bitmap.height}`);
+      log.screenshot(`📸 Capture resolution: ${bitmap.width}×${bitmap.height}`);
       const canvas = document.createElement('canvas');
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
@@ -2353,7 +2473,7 @@
       bitmap.close();
       return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     } catch (e) {
-      debug('📸 ImageCapture failed, using video fallback:', e.message);
+      log.screenshot.warn('📸 ImageCapture failed, using video fallback:', e.message);
     }
 
     // Fallback: draw from video element
@@ -2361,7 +2481,7 @@
     const canvas = document.createElement('canvas');
     canvas.width = screenshotVideo.videoWidth;
     canvas.height = screenshotVideo.videoHeight;
-    debug(`📸 Capture resolution (fallback): ${canvas.width}×${canvas.height}`);
+    log.screenshot(`📸 Capture resolution (fallback): ${canvas.width}×${canvas.height}`);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(screenshotVideo, 0, 0);
     return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
@@ -2384,13 +2504,13 @@
         const clipItem = new ClipboardItem({ 'image/png': blob });
         await navigator.clipboard.write([clipItem]);
       } catch (e) {
-        debug('📸 Clipboard write failed:', e.message);
+        log.screenshot.warn('📸 Clipboard write failed:', e.message);
       }
     }
 
     const input = await findChatInputWithRetry(inputRetryAttempts, inputRetryDelayMs, { allowHidden: allowHiddenInput });
     if (!input) {
-      debug('📸 Screenshot paste failed: chat input not found');
+      log.screenshot.warn('📸 Screenshot paste failed: chat input not found');
       return false;
     }
     const composerRoot = getComposerRoot(input);
@@ -2420,7 +2540,7 @@
       // If we couldn't prove insertion, report failure so background can retry.
       return false;
     } catch (e) {
-      debug('📸 Synthetic paste failed:', e.message);
+      log.screenshot.error('📸 Synthetic paste failed:', e.message);
       return false;
     }
   }
@@ -2439,7 +2559,7 @@
     }
     const btn = document.querySelector('.persephone-camera-btn');
     if (btn) btn.classList.remove('stream-active');
-    debug('📸 Stream stopped');
+    log.screenshot('📸 Stream stopped');
   }
 
   /**
@@ -2469,7 +2589,7 @@
           }
         });
       } catch (err) {
-        debug('📸 getDisplayMedia cancelled or failed:', err.message);
+        log.screenshot.warn('📸 getDisplayMedia cancelled or failed:', err.message);
         return;
       }
 
@@ -2494,7 +2614,7 @@
 
       if (btn) btn.classList.add('stream-active');
       const trackSettings = screenshotStream.getVideoTracks()[0].getSettings();
-      debug(`📸 Stream started — ${trackSettings.width}×${trackSettings.height} @ ${trackSettings.frameRate}fps`);
+      log.screenshot(`📸 Stream started — ${trackSettings.width}×${trackSettings.height} @ ${trackSettings.frameRate}fps`);
       showToast('Window selected — click again to capture');
       return;
     }
@@ -2522,9 +2642,9 @@
     blobToDataUrl(blob).then(dataUrl => {
       try {
         chrome.runtime.sendMessage({ type: 'BROADCAST_SCREENSHOT', dataUrl })
-          .catch(err => debug('📸 Broadcast error:', err));
+          .catch(err => log.screenshot.error('📸 Broadcast error:', err));
       } catch (e) {
-        debug('📸 Broadcast send threw:', e);
+        log.screenshot.error('📸 Broadcast send threw:', e);
       }
     });
 
@@ -2549,7 +2669,7 @@
     btn.addEventListener('click', handleScreenshotClick);
 
     document.body.appendChild(btn);
-    debug('📸 Camera button injected');
+    log.screenshot('📸 Camera button injected');
   }
 
   // ============================================
@@ -2677,7 +2797,7 @@
         if (val && val >= 50) {
           splitThreshold = val;
           chrome.storage.sync.set({ splitThreshold: val });
-          debug(`📝 Split threshold updated: ${val}`);
+          log.ui.debug(`📝 Split threshold updated: ${val}`);
         }
       }, 600);
     });
@@ -2755,7 +2875,7 @@
         });
       } catch (e) {
         tabListContainer.innerHTML = '<div class="persephone-tab-loading">Error loading tabs</div>';
-        debug('⚙️ Tab list error:', e.message);
+        log.ui.error('⚙️ Tab list error:', e.message);
       }
     }
 
@@ -2785,7 +2905,79 @@
 
     document.body.appendChild(gearBtn);
     document.body.appendChild(panel);
-    debug('⚙️ Settings widget injected');
+    log.ui('⚙️ Settings widget injected');
+  }
+
+  // ============================================
+  // DIAGNOSTIC DUMP
+  // ============================================
+
+  /**
+   * Dump all internal state to the console for debugging.
+   * Triggered by Cmd/Ctrl+Shift+D.
+   */
+  function dumpDiagnostics() {
+    const containers = document.querySelectorAll(SELECTORS.responseContainer);
+    const health = runSelectorHealthCheck();
+
+    const dump = {
+      site: SITE,
+      timestamp: new Date().toISOString(),
+
+      settings: {
+        extensionEnabled,
+        autoSendFirstChunk,
+        splitThreshold,
+        autoSubmitVoice,
+        autoSendSkipKeywords,
+      },
+
+      streaming: {
+        currentStreamingContainer: currentStreamingContainer
+          ? { connected: currentStreamingContainer.isConnected, streaming: isElementStreaming(currentStreamingContainer) }
+          : null,
+        lastContainerCount,
+        actualContainerCount: containers.length,
+        checkInProgress,
+      },
+
+      tracking: {
+        seenTextsSize: seenTexts.size,
+        sentByHashSize: sentByHash.size,
+        sentByHashKeys: [...sentByHash.keys()],
+        sentMessagesSize: sentMessages.size,
+        pendingScreenshots: pendingScreenshots.length,
+      },
+
+      media: {
+        screenshotStreamActive: !!screenshotStream,
+        micRecording,
+      },
+
+      selectors: health.results.map(c => ({
+        name: c.name,
+        count: c.count,
+        ok: c.ok,
+        critical: c.critical,
+      })),
+
+      contextValid: isContextValid(),
+    };
+
+    console.group('[Persephone] Diagnostic Dump');
+    console.log(JSON.stringify(dump, null, 2));
+    console.groupEnd();
+
+    console.group('[Persephone] Recent Log Entries (last 50)');
+    const recent = log.getRecent(50);
+    recent.forEach(entry => {
+      const time = new Date(entry.ts).toLocaleTimeString();
+      const prefix = `${time} [${entry.cat}:${entry.lvl}]`;
+      console.log(prefix, entry.msg);
+    });
+    console.groupEnd();
+
+    showToast('Diagnostic dump written to console (Cmd+Opt+J to view)');
   }
 
   // ============================================
@@ -2793,7 +2985,7 @@
   // ============================================
 
   function init() {
-    debug('🚀 Persephone v3.8 (with screenshot capture)');
+    log.init('🚀 Persephone v3.8 (with screenshot capture)');
 
     injectStyles();
     injectMicButton();
@@ -2810,7 +3002,7 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && pendingScreenshots.length > 0) {
         const queued = pendingScreenshots.splice(0);
-        debug(`📸 Tab visible — pasting ${queued.length} queued screenshot(s)`);
+        log.screenshot(`📸 Tab visible — pasting ${queued.length} queued screenshot(s)`);
         // Small delay to let the tab fully activate and framework initialize
         setTimeout(async () => {
           for (const blob of queued) {
@@ -2818,7 +3010,7 @@
               focusInput: true,
               writeClipboard: false
             });
-            debug(ok ? '📸 Queued screenshot pasted' : '📸 Queued screenshot paste failed');
+            log.screenshot(ok ? '📸 Queued screenshot pasted' : '📸 Queued screenshot paste failed');
             if (ok) showToast('Screenshot pasted');
           }
         }, 300);
@@ -2842,6 +3034,11 @@
         if (e.key.toLowerCase() === 'a') {
           e.preventDefault();
           toggleAutoSend();
+        }
+        // Cmd/Ctrl+Shift+D - Diagnostic dump
+        if (e.key.toLowerCase() === 'd') {
+          e.preventDefault();
+          dumpDiagnostics();
         }
       }
     });
@@ -2870,16 +3067,16 @@
       }
       if (request.type === 'SKIP_KEYWORDS_CHANGED') {
         autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
-        debug(`📝 Skip keywords updated: ${autoSendSkipKeywords.length} keywords`);
+        log.state.debug(`📝 Skip keywords updated: ${autoSendSkipKeywords.length} keywords`);
       }
       if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
         splitThreshold = request.splitThreshold || 250;
-        debug(`📝 Split threshold updated: ${splitThreshold}`);
+        log.state.debug(`📝 Split threshold updated: ${splitThreshold}`);
         updateWidgetStates();
       }
       if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
         autoSubmitVoice = request.autoSubmitVoice === true;
-        debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
+        log.voice.debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
         updateWidgetStates();
       }
       if (request.type === 'INSERT_AND_SUBMIT') {
@@ -2893,7 +3090,7 @@
         // rendering so DOM-based detection fails (causes double-paste).
         if (document.visibilityState !== 'visible') {
           pendingScreenshots.push(blob);
-          debug('📸 Screenshot queued — will paste when tab becomes visible');
+          log.screenshot('📸 Screenshot queued — will paste when tab becomes visible');
           sendResponse({ success: true });
           return true;
         }
@@ -2902,7 +3099,7 @@
           focusInput: true,
           writeClipboard: false
         }).then((ok) => {
-          debug(ok ? '📸 Screenshot pasted from broadcast' : '📸 Screenshot broadcast paste failed');
+          log.screenshot(ok ? '📸 Screenshot pasted from broadcast' : '📸 Screenshot broadcast paste failed');
           sendResponse({ success: ok });
         });
         return true;
@@ -2940,13 +3137,17 @@
       lastContainerCount = existingContainers.length;
 
       const count = scanAllResponses();
-      debug(`📋 Initial scan: ${count} buttons added, ${lastContainerCount} existing responses`);
+      log.init(`📋 Initial scan: ${count} buttons added, ${lastContainerCount} existing responses`);
+
+      // Run selector health check after initial scan
+      healthCheckWithToast();
 
       // Start global observer for immediate detection of new responses
       startGlobalObserver();
 
       // Fallback polling (MutationObserver is primary; this is a safety net)
       let lastPollCheck = 0;
+      let healthCheckRuns = 0;
       setInterval(() => {
         scanAllResponses();
         const now = Date.now();
@@ -2954,9 +3155,14 @@
           lastPollCheck = now;
           checkForNewResponse();
         }
+        // Re-run health check every ~30s (15th run of 2s interval)
+        healthCheckRuns++;
+        if (healthCheckRuns % 15 === 0) {
+          healthCheckWithToast();
+        }
       }, 2000);
 
-      debug('✅ Ready');
+      log.init('✅ Ready');
     }, 500);
   }
 

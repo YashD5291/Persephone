@@ -2,6 +2,59 @@
 // Handles Telegram API communication with MarkdownV2 support
 // v3.3 - Added settings caching and API preconnect for lower latency
 
+// ============================================
+// STRUCTURED LOGGER
+// ============================================
+
+const BG_LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
+const BG_LOG_LEVEL = 'debug';
+
+const bgLogBuffer = [];
+const BG_LOG_BUFFER_MAX = 200;
+
+function createBgLogger() {
+  const categories = ['settings', 'telegram', 'screenshot', 'broadcast', 'native', 'init'];
+  const logger = {};
+
+  function emit(category, level, args) {
+    const entry = {
+      ts: Date.now(),
+      cat: category,
+      lvl: level,
+      msg: args.map(a => {
+        if (a === undefined) return 'undefined';
+        if (a === null) return 'null';
+        if (typeof a === 'object') { try { return JSON.stringify(a); } catch { return String(a); } }
+        return String(a);
+      }).join(' ')
+    };
+    bgLogBuffer.push(entry);
+    if (bgLogBuffer.length > BG_LOG_BUFFER_MAX) bgLogBuffer.shift();
+
+    if (BG_LOG_LEVELS[level] <= BG_LOG_LEVELS[BG_LOG_LEVEL]) {
+      const prefix = `[Persephone:${category}]`;
+      const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+      fn(prefix, ...args);
+    }
+  }
+
+  categories.forEach(cat => {
+    const logFn = (...args) => emit(cat, 'info', args);
+    logFn.debug = (...args) => emit(cat, 'debug', args);
+    logFn.info = (...args) => emit(cat, 'info', args);
+    logFn.warn = (...args) => emit(cat, 'warn', args);
+    logFn.error = (...args) => emit(cat, 'error', args);
+    logger[cat] = logFn;
+  });
+
+  logger.getBuffer = () => [...bgLogBuffer];
+  logger.getRecent = (n = 50) => bgLogBuffer.slice(-n);
+
+  return logger;
+}
+
+const log = createBgLogger();
+
 const TELEGRAM_MAX_LENGTH = 4096;
 
 // ============================================
@@ -45,13 +98,13 @@ async function sendScreenshotToTabWithRetry(tab, dataUrl, maxAttempts = 6) {
       });
 
       if (response?.success) {
-        console.log(`[Persephone] Screenshot paste ACK from tab ${tab.id} on attempt ${attempt}`);
+        log.screenshot(`Screenshot paste ACK from tab ${tab.id} on attempt ${attempt}`);
         return true;
       }
 
-      console.warn(`[Persephone] Screenshot paste NACK/empty from tab ${tab.id} on attempt ${attempt}`);
+      log.screenshot.warn(`Screenshot paste NACK/empty from tab ${tab.id} on attempt ${attempt}`);
     } catch (err) {
-      console.error(`[Persephone] Failed screenshot send to tab ${tab.id} on attempt ${attempt}:`, err?.message || err);
+      log.screenshot.error(`Failed screenshot send to tab ${tab.id} on attempt ${attempt}:`, err?.message || err);
     }
 
     if (attempt < maxAttempts) {
@@ -59,7 +112,7 @@ async function sendScreenshotToTabWithRetry(tab, dataUrl, maxAttempts = 6) {
     }
   }
 
-  console.error(`[Persephone] Screenshot delivery failed after retries for tab ${tab.id}: ${tab.url}`);
+  log.screenshot.error(`Screenshot delivery failed after retries for tab ${tab.id}: ${tab.url}`);
   return false;
 }
 
@@ -84,7 +137,7 @@ async function loadSettingsCache() {
     lastLoaded: Date.now()
   };
 
-  console.log('[Persephone] Settings cached in memory');
+  log.settings('Settings cached in memory');
   return settingsCache;
 }
 
@@ -114,7 +167,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   for (const [key, { newValue }] of Object.entries(changes)) {
     if (key in settingsCache) {
       settingsCache[key] = newValue;
-      console.log(`[Persephone] Cache updated: ${key}`);
+      log.settings(`Cache updated: ${key}`);
     }
   }
 });
@@ -129,7 +182,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
  */
 async function preconnectTelegramAPI() {
   if (!settingsCache.botToken) {
-    console.log('[Persephone] Skipping preconnect - no bot token configured');
+    log.telegram('Skipping preconnect - no bot token configured');
     return;
   }
   
@@ -142,12 +195,12 @@ async function preconnectTelegramAPI() {
     });
     
     if (response.ok) {
-      console.log('[Persephone] API preconnect successful - connection warmed up');
+      log.telegram('API preconnect successful - connection warmed up');
     } else {
-      console.warn('[Persephone] API preconnect returned non-OK status');
+      log.telegram.warn('API preconnect returned non-OK status');
     }
   } catch (error) {
-    console.warn('[Persephone] API preconnect failed:', error.message);
+    log.telegram.warn('API preconnect failed:', error.message);
   }
 }
 
@@ -177,7 +230,7 @@ async function toggleWhisper(refocus = false) {
     const response = await chrome.runtime.sendNativeMessage('com.persephone.host', { action: 'toggle', refocus });
     return { success: response?.success ?? false };
   } catch (error) {
-    console.error('[Persephone] Native messaging error:', error.message);
+    log.native.error('Native messaging error:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -190,7 +243,7 @@ async function getClipboard() {
     const response = await chrome.runtime.sendNativeMessage('com.persephone.host', { action: 'get_clipboard' });
     return { success: response?.success ?? false, text: response?.text ?? '' };
   } catch (error) {
-    console.error('[Persephone] Clipboard read error:', error.message);
+    log.native.error('Clipboard read error:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -261,16 +314,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'BROADCAST_QUESTION') {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
-    console.log('[Persephone] Broadcasting question to other tabs, sender:', senderTabId);
+    log.broadcast('Broadcasting question to other tabs, sender:', senderTabId);
     chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
-      console.log('[Persephone] Found tabs:', tabs.map(t => `${t.id}:${t.url}`));
+      log.broadcast('Found tabs:', tabs.map(t => `${t.id}:${t.url}`));
       tabs.forEach(tab => {
         if (tab.id !== senderTabId) {
-          console.log('[Persephone] Sending INSERT_AND_SUBMIT to tab:', tab.id, tab.url);
+          log.broadcast('Sending INSERT_AND_SUBMIT to tab:', tab.id, tab.url);
           chrome.tabs.sendMessage(tab.id, {
             type: 'INSERT_AND_SUBMIT',
             text: request.text
-          }).catch(err => console.error('[Persephone] Failed to send to tab:', tab.id, err));
+          }).catch(err => log.broadcast.error('Failed to send to tab:', tab.id, err));
         }
       });
       sendResponse({ success: true });
@@ -342,11 +395,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'BROADCAST_SCREENSHOT') {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
-    console.log('[Persephone] Broadcasting screenshot to other tabs, sender:', senderTabId);
+    log.screenshot('Broadcasting screenshot to other tabs, sender:', senderTabId);
     chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
       const targetTabs = tabs.filter(tab => tab.id !== senderTabId);
       Promise.all(targetTabs.map((tab) => {
-        console.log('[Persephone] Sending PASTE_SCREENSHOT to tab:', tab.id, tab.url);
+        log.screenshot('Sending PASTE_SCREENSHOT to tab:', tab.id, tab.url);
         return sendScreenshotToTabWithRetry(tab, request.dataUrl);
       }))
         .then((results) => {
@@ -354,7 +407,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: true, delivered, total: results.length });
         })
         .catch((err) => {
-          console.error('[Persephone] Screenshot broadcast failure:', err?.message || err);
+          log.screenshot.error('Screenshot broadcast failure:', err?.message || err);
           sendResponse({ success: false, error: err?.message || String(err) });
         });
     });
@@ -395,7 +448,7 @@ async function handleSendToTelegram(text) {
     // Update count in cache and storage
     settingsCache.messageCount++;
     chrome.storage.sync.set({ messageCount: settingsCache.messageCount }); // Fire and forget
-    console.log(`[Persephone] Message sent successfully. Total: ${settingsCache.messageCount}`);
+    log.telegram(`Message sent successfully. Total: ${settingsCache.messageCount}`);
   }
 
   return result;
@@ -501,7 +554,7 @@ async function sendTelegramMessage(botToken, chatId, text) {
         data = await response.json();
 
         if (!data.ok && data.description?.includes('parse')) {
-          console.warn('[Persephone] Markdown failed, retrying without formatting:', data.description);
+          log.telegram.warn('Markdown failed, retrying without formatting:', data.description);
           
           response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
@@ -530,7 +583,7 @@ async function sendTelegramMessage(botToken, chatId, text) {
       }
 
       if (!data.ok) {
-        console.error('[Persephone] Telegram API error:', data);
+        log.telegram.error('Telegram API error:', data);
         return { success: false, error: data.description || 'Unknown error' };
       }
 
@@ -543,7 +596,7 @@ async function sendTelegramMessage(botToken, chatId, text) {
       }
 
     } catch (error) {
-      console.error('[Persephone] Network error:', error);
+      log.telegram.error('Network error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -581,7 +634,7 @@ async function editTelegramMessage(botToken, chatId, messageId, newText) {
       data = await response.json();
 
       if (!data.ok && data.description?.includes('parse')) {
-        console.warn('[Persephone] Markdown failed on edit, retrying without formatting');
+        log.telegram.warn('Markdown failed on edit, retrying without formatting');
         
         response = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
           method: 'POST',
@@ -612,15 +665,15 @@ async function editTelegramMessage(botToken, chatId, messageId, newText) {
     }
 
     if (!data.ok) {
-      console.error('[Persephone] Edit error:', data);
+      log.telegram.error('Edit error:', data);
       return { success: false, error: data.description || 'Failed to edit message' };
     }
 
-    console.log('[Persephone] Message edited successfully');
+    log.telegram('Message edited successfully');
     return { success: true };
 
   } catch (error) {
-    console.error('[Persephone] Edit network error:', error);
+    log.telegram.error('Edit network error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -646,7 +699,7 @@ async function deleteTelegramMessage(botToken, chatId, messageId) {
       const data = await response.json();
 
       if (!data.ok) {
-        console.error('[Persephone] Delete error:', data);
+        log.telegram.error('Delete error:', data);
         return { success: false, error: data.description || 'Failed to delete message' };
       }
 
@@ -655,11 +708,11 @@ async function deleteTelegramMessage(botToken, chatId, messageId) {
       }
     }
 
-    console.log('[Persephone] Message(s) deleted successfully');
+    log.telegram('Message(s) deleted successfully');
     return { success: true };
 
   } catch (error) {
-    console.error('[Persephone] Delete network error:', error);
+    log.telegram.error('Delete network error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -715,7 +768,7 @@ async function initialize() {
   if (initialized) return;
   initialized = true;
 
-  console.log('[Persephone] Initializing...');
+  log.init('Initializing...');
   await loadSettingsCache();
   await loadTabOverrides();
   preconnectTelegramAPI();
@@ -723,7 +776,7 @@ async function initialize() {
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('[Persephone] Extension installed/updated:', details.reason);
+  log.init('Extension installed/updated:', details.reason);
 
   // Set default settings
   const result = await chrome.storage.sync.get(['messageCount', 'botToken', 'chatId']);
@@ -732,7 +785,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   if (Object.keys(defaults).length > 0) {
     await chrome.storage.sync.set(defaults);
-    console.log('[Persephone] Default settings applied:', defaults);
+    log.init('Default settings applied:', defaults);
   }
 
   await initialize();
@@ -740,7 +793,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Service worker startup (when woken up)
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('[Persephone] Service worker started');
+  log.init('Service worker started');
   await initialize();
 });
 
