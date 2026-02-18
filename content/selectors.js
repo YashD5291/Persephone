@@ -129,16 +129,24 @@
   function runSelectorHealthCheck() {
     const checks = [];
 
+    // Detect if the page has any AI responses (responseContainer with 0 matches is
+    // normal on a fresh/empty conversation — only flag it if responses are visible)
+    const hasVisibleResponses = SITE === 'claude'
+      ? document.querySelectorAll('.font-claude-response').length > 0
+      : document.querySelectorAll('.response-content-markdown').length > 0;
+
     // Check each SELECTOR_DEFS entry (primary + any active fallback)
     for (const [name, def] of Object.entries(SELECTOR_DEFS)) {
       const primaryCount = document.querySelectorAll(def.primary).length;
       const activeFallback = sel._active[name] !== def.primary ? sel._active[name] : null;
+      // responseContainer is only critical when responses exist on the page
+      const effectiveCritical = (name === 'responseContainer') ? (def.critical && hasVisibleResponses) : def.critical;
       checks.push({
         name,
         selector: def.primary,
         count: primaryCount,
-        critical: def.critical,
-        ok: primaryCount > 0,
+        critical: effectiveCritical,
+        ok: primaryCount > 0 || (name === 'responseContainer' && !hasVisibleResponses),
         fallbackActive: activeFallback,
       });
     }
