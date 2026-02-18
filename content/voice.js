@@ -335,8 +335,14 @@
 
   /**
    * Handle mic button click — toggle MacWhisper recording.
+   * Guarded against re-entrant calls: rapid clicks while the async
+   * sendMessage is in-flight would desync state vs. actual MacWhisper state.
    */
+  let micToggling = false;
+
   async function handleMicClick() {
+    if (micToggling) return;
+
     if (!isContextValid()) {
       showToast('Extension disconnected. Please refresh.');
       return;
@@ -345,37 +351,42 @@
     const micBtn = document.querySelector('.persephone-mic-btn');
     if (!micBtn) return;
 
-    // Always keep focus on the chat input, not the button
-    const input = findChatInput();
-    if (input) input.focus();
-
-    if (!state.micRecording) {
-      // Starting recording
-      const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER });
-      if (result?.success) {
-        state.micRecording = true;
-        micBtn.classList.add('recording');
-        if (input) input.focus();
-        log.voice('🎙️ Recording started');
-      } else {
-        showToast('Failed to start MacWhisper');
-        log.voice.error('🎙️ Start failed:', result?.error);
-      }
-    } else {
-      // Stopping recording — capture what's in the input before MacWhisper types
-      const inputBefore = input ? getInputValue(input).trim() : '';
-
-      // refocus: true tells the native host to re-activate Chrome after F5
-      const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER, refocus: true });
-      state.micRecording = false;
-      micBtn.classList.remove('recording');
-
-      // Re-focus input so MacWhisper types into it
+    micToggling = true;
+    try {
+      // Always keep focus on the chat input, not the button
+      const input = findChatInput();
       if (input) input.focus();
-      log.voice('🎙️ Recording stopped, input focused, polling for transcription...');
 
-      // Poll the input for MacWhisper's typing
-      watchForTranscription(inputBefore);
+      if (!state.micRecording) {
+        // Starting recording
+        const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER });
+        if (result?.success) {
+          state.micRecording = true;
+          micBtn.classList.add('recording');
+          if (input) input.focus();
+          log.voice('🎙️ Recording started');
+        } else {
+          showToast('Failed to start MacWhisper');
+          log.voice.error('🎙️ Start failed:', result?.error);
+        }
+      } else {
+        // Stopping recording — capture what's in the input before MacWhisper types
+        const inputBefore = input ? getInputValue(input).trim() : '';
+
+        // refocus: true tells the native host to re-activate Chrome after F5
+        const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER, refocus: true });
+        state.micRecording = false;
+        micBtn.classList.remove('recording');
+
+        // Re-focus input so MacWhisper types into it
+        if (input) input.focus();
+        log.voice('🎙️ Recording stopped, input focused, polling for transcription...');
+
+        // Poll the input for MacWhisper's typing
+        watchForTranscription(inputBefore);
+      }
+    } finally {
+      micToggling = false;
     }
   }
 
