@@ -115,18 +115,108 @@
 
   const SITE = window.location.hostname.includes('claude.ai') ? 'claude' : 'grok';
 
-  const SELECTORS = SITE === 'claude' ? {
-    responseContainer: 'div[data-is-streaming]',
-    userQuestion: '[data-testid="user-message"]',
-    cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
-    chatInput: 'div.ProseMirror[data-testid="chat-input"]',
-    sendButton: 'button[aria-label="Send message"]',
+  const SELECTOR_DEFS = SITE === 'claude' ? {
+    responseContainer: {
+      primary: 'div[data-is-streaming]',
+      fallbacks: ['[data-is-streaming]', '.font-claude-response'],
+      critical: true,
+    },
+    userQuestion: {
+      primary: '[data-testid="user-message"]',
+      fallbacks: ['[data-testid*="user-message"]'],
+      critical: false,
+    },
+    cleanTextRemove: {
+      primary: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
+      fallbacks: [],
+      critical: false,
+    },
+    chatInput: {
+      primary: 'div.ProseMirror[data-testid="chat-input"]',
+      fallbacks: [],  // findChatInput has its own fallback chain
+      critical: false,
+    },
+    sendButton: {
+      primary: 'button[aria-label="Send message"]',
+      fallbacks: ['button[aria-label="Send Message"]', 'button[data-testid="send-button"]'],
+      critical: false,
+    },
   } : {
-    responseContainer: '.items-start .response-content-markdown',
-    userQuestion: '[class*="items-end"] .message-bubble',
-    cleanTextRemove: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator, .animate-gaussian, .citation',
-    chatInput: '.query-bar div.tiptap.ProseMirror[contenteditable="true"]',
-    sendButton: 'button[aria-label="Submit"]',
+    responseContainer: {
+      primary: '.items-start .response-content-markdown',
+      fallbacks: ['.response-content-markdown'],
+      critical: true,
+    },
+    userQuestion: {
+      primary: '[class*="items-end"] .message-bubble',
+      fallbacks: ['.message-bubble'],
+      critical: false,
+    },
+    cleanTextRemove: {
+      primary: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator, .animate-gaussian, .citation',
+      fallbacks: [],
+      critical: false,
+    },
+    chatInput: {
+      primary: '.query-bar div.tiptap.ProseMirror[contenteditable="true"]',
+      fallbacks: [],  // findChatInput has its own fallback chain
+      critical: false,
+    },
+    sendButton: {
+      primary: 'button[aria-label="Submit"]',
+      fallbacks: ['button[type="submit"]'],
+      critical: false,
+    },
+  };
+
+  // Selector registry — tries primary first, then fallbacks. Logs when fallback activates.
+  const sel = {
+    _active: {},  // name -> currently working selector string
+
+    primary(name) {
+      const def = SELECTOR_DEFS[name];
+      return def ? def.primary : null;
+    },
+
+    query(name, root = document) {
+      const def = SELECTOR_DEFS[name];
+      if (!def) { log.selectors.warn('Unknown selector:', name); return null; }
+
+      let result = root.querySelector(def.primary);
+      if (result) { this._active[name] = def.primary; return result; }
+
+      for (const fb of def.fallbacks) {
+        result = root.querySelector(fb);
+        if (result) {
+          if (this._active[name] !== fb) {
+            log.selectors.warn(`${name}: primary failed, using fallback "${fb}"`);
+            this._active[name] = fb;
+          }
+          return result;
+        }
+      }
+      return null;
+    },
+
+    queryAll(name, root = document) {
+      const def = SELECTOR_DEFS[name];
+      if (!def) { log.selectors.warn('Unknown selector:', name); return []; }
+
+      let results = root.querySelectorAll(def.primary);
+      if (results.length > 0) { this._active[name] = def.primary; return results; }
+
+      for (const fb of def.fallbacks) {
+        results = root.querySelectorAll(fb);
+        if (results.length > 0) {
+          if (this._active[name] !== fb) {
+            log.selectors.warn(`${name}: primary failed, using fallback "${fb}"`);
+            this._active[name] = fb;
+          }
+          return results;
+        }
+      }
+      return results;  // empty NodeList
+    },
   };
 
   function delay(ms) {
@@ -145,21 +235,26 @@
   function runSelectorHealthCheck() {
     const checks = [];
 
-    // Check each SELECTORS entry
-    for (const [name, selector] of Object.entries(SELECTORS)) {
-      const count = document.querySelectorAll(selector).length;
-      checks.push({ name, selector, count, critical: false, ok: count > 0 });
+    // Check each SELECTOR_DEFS entry (primary + any active fallback)
+    for (const [name, def] of Object.entries(SELECTOR_DEFS)) {
+      const primaryCount = document.querySelectorAll(def.primary).length;
+      const activeFallback = sel._active[name] !== def.primary ? sel._active[name] : null;
+      checks.push({
+        name,
+        selector: def.primary,
+        count: primaryCount,
+        critical: def.critical,
+        ok: primaryCount > 0,
+        fallbackActive: activeFallback,
+      });
     }
 
-    // Site-specific structural selectors (critical for core functionality)
+    // Site-specific structural selectors (extra checks beyond SELECTOR_DEFS)
     const structural = SITE === 'claude' ? [
-      { name: 'claude:streaming-container', selector: 'div[data-is-streaming]', critical: true },
       { name: 'claude:markdown-content', selector: '.standard-markdown, .progressive-markdown', critical: false },
       { name: 'claude:font-response', selector: '.font-claude-response', critical: false },
     ] : [
-      { name: 'grok:response-markdown', selector: '.response-content-markdown', critical: true },
       { name: 'grok:streaming-indicator', selector: '.animate-gaussian', critical: false },
-      { name: 'grok:user-bubble', selector: '.message-bubble', critical: false },
     ];
 
     for (const { name, selector, critical } of structural) {
@@ -172,7 +267,8 @@
     // Log results
     for (const c of checks) {
       if (c.ok) {
-        log.selectors.debug(`✔ ${c.name}: ${c.count} matches`);
+        const fbNote = c.fallbackActive ? ` (via fallback: ${c.fallbackActive})` : '';
+        log.selectors.debug(`✔ ${c.name}: ${c.count} matches${fbNote}`);
       } else {
         const level = c.critical ? 'warn' : 'debug';
         log.selectors[level](`✗ ${c.name}: 0 matches (${c.selector})`);
@@ -291,8 +387,8 @@
    */
   function getLatestUserQuestion(container) {
     try {
-      if (!SELECTORS.userQuestion) return '';
-      const allUserMsgs = document.querySelectorAll(SELECTORS.userQuestion);
+      if (!sel.primary('userQuestion')) return '';
+      const allUserMsgs = sel.queryAll('userQuestion');
       if (allUserMsgs.length === 0) return '';
       const question = allUserMsgs[allUserMsgs.length - 1].textContent.trim();
       return question;
@@ -340,7 +436,7 @@
     const clone = element.cloneNode(true);
     
     // Remove unwanted elements
-    clone.querySelectorAll(SELECTORS.cleanTextRemove)
+    sel.queryAll('cleanTextRemove', clone)
       .forEach(el => el.remove());
 
     // Convert formatting
@@ -730,7 +826,7 @@
   function scanAllResponses() {
     if (!state.extensionEnabled) return 0;
 
-    const containers = document.querySelectorAll(SELECTORS.responseContainer);
+    const containers = sel.queryAll('responseContainer');
     let totalAdded = 0;
 
     containers.forEach(container => {
@@ -753,7 +849,7 @@
     state.checkInProgress = true;
 
     try {
-      const containers = document.querySelectorAll(SELECTORS.responseContainer);
+      const containers = sel.queryAll('responseContainer');
       if (containers.length === 0) return;
 
       const latest = containers[containers.length - 1];
@@ -2109,7 +2205,7 @@
   function findChatInput(options = {}) {
     const allowHidden = options.allowHidden === true;
     const selectors = [
-      SELECTORS.chatInput,
+      sel.primary('chatInput'),
       '[data-testid="chat-input"][contenteditable="true"]',
       '[role="textbox"][contenteditable="true"]',
       'div.ProseMirror[contenteditable="true"]',
@@ -2223,7 +2319,7 @@
     const input = findChatInput();
 
     // 1. Try the send/submit button if visible and enabled
-    const sendBtn = document.querySelector(SELECTORS.sendButton);
+    const sendBtn = sel.query('sendButton');
     if (sendBtn && !sendBtn.disabled && sendBtn.offsetParent !== null) {
       sendBtn.click();
       log.voice('🎙️ Submit: clicked send button');
@@ -2368,8 +2464,8 @@
     } else {
       // Contenteditable (ProseMirror) — try execCommand first
       try {
-        const sel = window.getSelection();
-        sel.selectAllChildren(input);
+        const selection = window.getSelection();
+        selection.selectAllChildren(input);
         document.execCommand('delete');
         inserted = document.execCommand('insertText', false, text);
       } catch (e) {
@@ -2964,7 +3060,7 @@
    * Triggered by Cmd/Ctrl+Shift+D.
    */
   function dumpDiagnostics() {
-    const containers = document.querySelectorAll(SELECTORS.responseContainer);
+    const containers = sel.queryAll('responseContainer');
     const health = runSelectorHealthCheck();
 
     const dump = {
@@ -3180,7 +3276,7 @@
 
     setTimeout(() => {
       // Set initial container count to avoid auto-sending existing responses
-      const existingContainers = document.querySelectorAll(SELECTORS.responseContainer);
+      const existingContainers = sel.queryAll('responseContainer');
       state.lastContainerCount = existingContainers.length;
 
       const count = scanAllResponses();
