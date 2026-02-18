@@ -181,12 +181,17 @@ async function loadSettingsCache() {
   return settingsCache;
 }
 
+const SETTINGS_STALE_MS = 10 * 60 * 1000; // 10 minutes
+
 /**
- * Ensure settings are loaded — reloads from storage if botToken or chatId is missing.
+ * Ensure settings are loaded — reloads from storage if botToken/chatId is missing
+ * or if cache is older than 10 minutes (guards against chrome.alarms failing to fire).
  * Returns true if settings are available, false otherwise.
  */
 async function ensureSettings() {
-  if (!settingsCache.botToken || !settingsCache.chatId) {
+  const stale = settingsCache.lastLoaded && (Date.now() - settingsCache.lastLoaded > SETTINGS_STALE_MS);
+  if (!settingsCache.botToken || !settingsCache.chatId || stale) {
+    if (stale) log.settings('Settings stale (>10min), reloading');
     await loadSettingsCache();
   }
   return !!(settingsCache.botToken && settingsCache.chatId);
@@ -221,6 +226,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
  * This establishes TCP/TLS connection before it's needed
  */
 async function preconnectTelegramAPI() {
+  await ensureSettings();
   if (!settingsCache.botToken) {
     log.telegram('Skipping preconnect - no bot token configured');
     return;
@@ -308,7 +314,10 @@ function validateMessage(request) {
   return null;
 }
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+let initPromise = null;
+const pendingMessages = [];
+
+function handleMessage(request, sender, sendResponse) {
   const validationError = validateMessage(request);
   if (validationError) {
     log.settings.warn('Invalid message:', validationError, request);
@@ -493,6 +502,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   log.settings.warn('Unhandled message type:', request.type);
   sendResponse({ success: false, error: `No handler for ${request.type}` });
   return false;
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (initialized) {
+    return handleMessage(request, sender, sendResponse);
+  }
+
+  // Queue message until initialization completes
+  pendingMessages.push({ request, sender, sendResponse });
+  if (!initPromise) initPromise = initialize();
+  initPromise.then(() => {
+    const queued = pendingMessages.splice(0);
+    queued.forEach(m => handleMessage(m.request, m.sender, m.sendResponse));
+  });
+  return true; // Will respond async
 });
 
 async function sendTestMessage(botToken, chatId) {
