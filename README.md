@@ -246,18 +246,38 @@ Claude restructures its DOM when streaming completes — Persephone handles this
 
 ```
 Persephone/
-├── manifest.json      # Extension manifest (V3)
-├── popup.html         # Settings popup UI
-├── popup.css          # Popup styling
-├── popup.js           # Popup logic
-├── content.js         # DOM monitor, inline buttons, voice input (site-aware)
-├── background.js      # Telegram API handler, native messaging bridge
-├── .gitignore         # Git ignore file
+├── manifest.json          # Extension manifest (V3)
+├── background.js          # Service worker entry (loads background/*.js via importScripts)
+├── background/
+│   ├── constants.js       # MSG protocol constants
+│   ├── logger.js          # Structured logger
+│   ├── settings.js        # Settings cache, tab overrides, ensureSettings
+│   ├── native.js          # MacWhisper native messaging
+│   ├── telegram.js        # Telegram API (send, edit, delete, preconnect)
+│   ├── messages.js        # Message router, validation, pre-init queue
+│   └── init.js            # Lifecycle listeners, initialize()
+├── content/
+│   ├── constants.js       # MSG constants, shared namespace init
+│   ├── logger.js          # Structured logger with categories
+│   ├── state.js           # Centralized state, container ID tracking
+│   ├── selectors.js       # Site detection, selector registry with fallbacks
+│   ├── text.js            # Text extraction, hashing, formatting
+│   ├── telegram.js        # Telegram API calls from content script
+│   ├── buttons.js         # Button injection, action groups, edit modal
+│   ├── streaming.js       # MutationObservers, live stream first chunk
+│   ├── voice.js           # MacWhisper voice input, chat input helpers
+│   ├── screenshot.js      # Screenshot capture and paste
+│   ├── widget.js          # Floating settings widget, toggles
+│   ├── styles.js          # CSS injection
+│   └── init.js            # Entry point, event wiring, diagnostics
+├── popup.html             # Settings popup UI
+├── popup.css              # Popup styling
+├── popup.js               # Popup logic
 ├── icons/
 │   ├── icon16.png
 │   ├── icon48.png
 │   ├── icon128.png
-│   └── logo.png       # Popup header logo
+│   └── logo.png           # Popup header logo
 └── native-host/
     ├── persephone_host.py      # Native messaging host (Python)
     ├── com.persephone.host.json # Native messaging manifest template
@@ -364,6 +384,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v5.0** - Production hardening: modular file split (content.js → 13 modules, background.js → 7 modules), structured logging, centralized state, cyrb53 hashing, selector fallback chains, async init with settings gate, per-container streaming locks, message protocol constants with validation, service worker pre-init queue, stale settings detection
 - **v4.7** - Positive-scoping thinking filter via `getResponseScope()` (ignores `.font-ui` tool timelines and thinking UI entirely), fixes for web search "10 results" leaking into auto-stream, auto-stream sent-state preserved across Claude DOM rebuilds
 - **v4.6** - Per-tab auto-send persistence across refreshes, deferred screenshot paste for background tabs, voice/screenshot broadcasts no longer switch active tab, color-coded toast notifications, Claude thinking section filter, skip keywords support for Claude
 - **v4.5** - Floating settings widget with gear button, per-tab auto-send management via tab list, inline extension/voice/threshold controls
