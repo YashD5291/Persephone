@@ -547,6 +547,14 @@
         min-width: 0;
         flex: 1;
       }
+      .persephone-tab-dot {
+        flex-shrink: 0;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+      .persephone-tab-dot.reachable { background: #22c55e; }
+      .persephone-tab-dot.stale { background: #f97316; }
       .persephone-tab-badge {
         flex-shrink: 0;
         width: 18px;

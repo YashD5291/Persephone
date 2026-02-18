@@ -284,6 +284,10 @@
           const info = document.createElement('div');
           info.className = 'persephone-tab-info';
 
+          const dot = document.createElement('span');
+          dot.className = `persephone-tab-dot ${tab.reachable ? 'reachable' : 'stale'}`;
+          dot.title = tab.reachable ? 'Tab connected' : 'Tab unreachable — reload to reconnect';
+
           const badge = document.createElement('span');
           badge.className = `persephone-tab-badge ${tab.site}`;
           badge.textContent = tab.site === 'claude' ? 'C' : 'G';
@@ -295,6 +299,7 @@
           if (displayTitle.length > 22) displayTitle = displayTitle.substring(0, 22) + '...';
           title.textContent = displayTitle;
 
+          info.appendChild(dot);
           info.appendChild(badge);
           info.appendChild(title);
 

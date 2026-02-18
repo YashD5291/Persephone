@@ -101,7 +101,7 @@ function handleMessage(request, sender, sendResponse) {
           chrome.tabs.sendMessage(tab.id, {
             type: MSG.INSERT_AND_SUBMIT,
             text: request.text
-          }).catch(err => log.broadcast.error('Failed to send to tab:', tab.id, err));
+          }).catch(err => log.broadcast.debug('Tab unreachable:', tab.id, err.message));
         }
       });
       sendResponse({ success: true });
@@ -124,7 +124,8 @@ function handleMessage(request, sender, sendResponse) {
             title: tab.title || '',
             url: tab.url,
             autoSend: override !== undefined ? override : (response?.autoSend ?? true),
-            site: response?.site || (tab.url.includes('claude') ? 'claude' : 'grok')
+            site: response?.site || (tab.url.includes('claude') ? 'claude' : 'grok'),
+            reachable: true
           });
         } catch (e) {
           tabList.push({
@@ -132,7 +133,8 @@ function handleMessage(request, sender, sendResponse) {
             title: tab.title || '',
             url: tab.url,
             autoSend: override !== undefined ? override : true,
-            site: tab.url.includes('claude') ? 'claude' : 'grok'
+            site: tab.url.includes('claude') ? 'claude' : 'grok',
+            reachable: false
           });
         }
       }
