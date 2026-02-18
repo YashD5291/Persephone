@@ -4,25 +4,61 @@
 (function() {
   'use strict';
 
-  let seenTexts = new Set();
-  let currentStreamingContainer = null;
-  let lastContainerCount = 0;
-  let autoSentContainers = new WeakSet(); // Track containers that had auto-send
-  let activeStreamingObservers = new WeakSet(); // Track containers with active streaming observers
-  let checkInProgress = false; // Re-entrancy guard for checkForNewResponse
-  let sentMessages = new Map(); // Track sent messages: element -> { messageId, text }
-  let sentByHash = new Map(); // Track sent messages by text hash -> { messageId, text, isMultiPart }
-  let extensionEnabled = true; // Master toggle - enabled by default
-  let autoSendFirstChunk = true; // Enabled by default
-  let splitThreshold = 250; // Character count above which paragraphs get split send buttons
-  let autoSubmitVoice = false; // Auto-submit transcribed voice input
-  let screenshotStream = null;   // Active MediaStream from getDisplayMedia
-  let screenshotVideo = null;    // Hidden <video> element for frame capture
-  let pendingScreenshots = [];   // Queued blobs for background tabs (pasted on visibility)
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
-  let autoSendSkipKeywords = [...DEFAULT_SKIP_KEYWORDS];
-  let containerQuestions = new WeakMap(); // container -> question text at time of streaming start
+
+  // ============================================
+  // CENTRALIZED STATE
+  // ============================================
+
+  let _containerIdSeq = 0;
+
+  /**
+   * Get or create a stable ID for a DOM container element.
+   * Used to key Sets/Maps instead of element references (which break on DOM rebuild).
+   */
+  function getContainerId(el) {
+    if (!el) return null;
+    let id = el.getAttribute('data-persephone-id');
+    if (!id) {
+      id = 'p-' + (++_containerIdSeq);
+      el.setAttribute('data-persephone-id', id);
+    }
+    return id;
+  }
+
+  const state = {
+    // Settings (loaded from storage)
+    extensionEnabled: true,
+    autoSendFirstChunk: true,
+    splitThreshold: 250,
+    autoSubmitVoice: false,
+    autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
+
+    // Streaming detection
+    currentStreamingContainer: null,
+    lastContainerCount: 0,
+    checkInProgress: false,
+
+    // Tracking maps
+    seenTexts: new Set(),
+    sentMessages: new Map(),       // element -> { messageId, text, isMultiPart }
+    sentByHash: new Map(),         // textHash -> { messageId, text, isMultiPart }
+
+    // Container tracking (keyed by container ID string, not element reference)
+    autoSentContainers: new Set(),       // Set<containerId> — containers that had auto-send
+    activeStreamingObservers: new Set(), // Set<containerId> — containers with active observers
+    containerQuestions: new Map(),       // Map<containerId, questionText>
+
+    // Media
+    screenshotStream: null,
+    screenshotVideo: null,
+    pendingScreenshots: [],
+    micRecording: false,
+
+    // Health check
+    healthCheckWarned: false,
+  };
 
   // ============================================
   // STRUCTURED LOGGER
@@ -150,17 +186,16 @@
    * Run health check and show toast if critical selectors are broken.
    * Only warns once per session to avoid spam.
    */
-  let _healthCheckWarned = false;
 
   function healthCheckWithToast() {
     const { ok, results } = runSelectorHealthCheck();
     const criticalFailures = results.filter(c => c.critical && !c.ok);
 
-    if (criticalFailures.length > 0 && !_healthCheckWarned) {
+    if (criticalFailures.length > 0 && !state.healthCheckWarned) {
       // Only warn if the page has loaded enough content to expect matches
       const hasContent = document.querySelectorAll('p, h1, h2, pre').length > 3;
       if (hasContent) {
-        _healthCheckWarned = true;
+        state.healthCheckWarned = true;
         const names = criticalFailures.map(c => c.name).join(', ');
         log.selectors.warn(`Critical selector failures: ${names}`);
         showToast(`Persephone: DOM structure may have changed (${names})`, 'error');
@@ -256,9 +291,9 @@
   }
 
   function shouldSkipAutoSend(question) {
-    if (!question || autoSendSkipKeywords.length === 0) return false;
+    if (!question || state.autoSendSkipKeywords.length === 0) return false;
     const lower = question.toLowerCase();
-    return autoSendSkipKeywords.some(kw => {
+    return state.autoSendSkipKeywords.some(kw => {
       const k = kw.toLowerCase().trim();
       return k && lower.includes(k);
     });
@@ -411,8 +446,8 @@
         };
 
         // Store message info for edit/delete (by element and by hash)
-        sentMessages.set(element, msgData);
-        sentByHash.set(textHash, msgData);
+        state.sentMessages.set(element, msgData);
+        state.sentByHash.set(textHash, msgData);
 
         // Replace send button with action buttons
         replaceWithActionButtons(element, btn);
@@ -455,7 +490,7 @@
           isMultiPart: result.isMultiPart
         };
 
-        sentByHash.set(textHash, msgData);
+        state.sentByHash.set(textHash, msgData);
 
         // Replace this button with a checkmark
         const sentIndicator = document.createElement('span');
@@ -492,7 +527,7 @@
       e.preventDefault();
       e.stopPropagation();
 
-      const msgData = sentMessages.get(element);
+      const msgData = state.sentMessages.get(element);
       if (!msgData) return;
 
       resendBtn.style.opacity = '0.5';
@@ -507,8 +542,8 @@
           isMultiPart: result.isMultiPart
         };
         // Update both maps
-        sentMessages.set(element, newMsgData);
-        sentByHash.set(hashText(msgData.text), newMsgData);
+        state.sentMessages.set(element, newMsgData);
+        state.sentByHash.set(hashText(msgData.text), newMsgData);
         showToast('✓ Message resent');
       }
 
@@ -538,7 +573,7 @@
       e.preventDefault();
       e.stopPropagation();
 
-      const msgData = sentMessages.get(element);
+      const msgData = state.sentMessages.get(element);
       if (!msgData) return;
 
       // Show confirmation
@@ -552,8 +587,8 @@
       if (success) {
         // Remove from both maps
         const textHash = hashText(msgData.text);
-        sentMessages.delete(element);
-        sentByHash.delete(textHash);
+        state.sentMessages.delete(element);
+        state.sentByHash.delete(textHash);
 
         // Replace action buttons with send button again
         const newSendBtn = createSendButton(element, extractText(element));
@@ -598,9 +633,9 @@
     element.style.position = 'relative';
 
     // Check if this text was already sent (e.g. live-streamed first chunk after DOM rebuild)
-    if (sentByHash.has(hash)) {
-      const msgData = sentByHash.get(hash);
-      sentMessages.set(element, msgData);
+    if (state.sentByHash.has(hash)) {
+      const msgData = state.sentByHash.get(hash);
+      state.sentMessages.set(element, msgData);
       const btnGroup = createActionButtonGroup(element);
       element.appendChild(btnGroup);
       log.state(`♻️ Restored sent state for: ${text.substring(0, 50)}...`);
@@ -608,14 +643,14 @@
     }
 
     // Long paragraph: split into two sub-chunks (only for non-streamed paragraphs)
-    if (text.length > splitThreshold) {
+    if (text.length > state.splitThreshold) {
       const [chunk1, chunk2] = splitText(text);
       const hash1 = hashText(chunk1);
       const hash2 = hashText(chunk2);
 
       // Check if chunks were already sent (restore path)
-      const sent1 = sentByHash.has(hash1);
-      const sent2 = sentByHash.has(hash2);
+      const sent1 = state.sentByHash.has(hash1);
+      const sent2 = state.sentByHash.has(hash2);
 
       if (sent1) {
         const indicator = document.createElement('span');
@@ -637,8 +672,8 @@
         element.appendChild(createSplitSendButton(element, chunk2, 2));
       }
 
-      if (!seenTexts.has(hash)) {
-        seenTexts.add(hash);
+      if (!state.seenTexts.has(hash)) {
+        state.seenTexts.add(hash);
         log.ui.debug(`✅ <${element.tagName.toLowerCase()}> (split): ${text.substring(0, 50)}...`);
       }
 
@@ -649,8 +684,8 @@
     const btn = createSendButton(element, text);
     element.appendChild(btn);
 
-    if (!seenTexts.has(hash)) {
-      seenTexts.add(hash);
+    if (!state.seenTexts.has(hash)) {
+      state.seenTexts.add(hash);
       log.ui.debug(`✅ <${element.tagName.toLowerCase()}>: ${text.substring(0, 50)}...`);
     }
 
@@ -661,7 +696,7 @@
    * Scan a container and add buttons to all content elements
    */
   function processContainer(container) {
-    if (!container || !extensionEnabled) return 0;
+    if (!container || !state.extensionEnabled) return 0;
 
     // Scope to response section only (skips thinking content for Claude)
     const scope = getResponseScope(container);
@@ -682,7 +717,7 @@
    * Scan ALL responses on the page
    */
   function scanAllResponses() {
-    if (!extensionEnabled) return 0;
+    if (!state.extensionEnabled) return 0;
 
     const containers = document.querySelectorAll(SELECTORS.responseContainer);
     let totalAdded = 0;
@@ -702,44 +737,44 @@
    * Check for new streaming response
    */
   function checkForNewResponse() {
-    if (!extensionEnabled) return;
-    if (checkInProgress) return;
-    checkInProgress = true;
+    if (!state.extensionEnabled) return;
+    if (state.checkInProgress) return;
+    state.checkInProgress = true;
 
     try {
       const containers = document.querySelectorAll(SELECTORS.responseContainer);
       if (containers.length === 0) return;
 
       const latest = containers[containers.length - 1];
-      const isNewContainer = containers.length > lastContainerCount;
+      const isNewContainer = containers.length > state.lastContainerCount;
       const isStreaming = isElementStreaming(latest);
 
       // Detect new response (container count increased or new streaming on different container)
-      if (isNewContainer || (isStreaming && latest !== currentStreamingContainer)) {
-        lastContainerCount = containers.length;
+      if (isNewContainer || (isStreaming && latest !== state.currentStreamingContainer)) {
+        state.lastContainerCount = containers.length;
 
         if (isStreaming) {
           log.streaming('⚡ Streaming response detected');
-          currentStreamingContainer = latest;
+          state.currentStreamingContainer = latest;
 
           // Capture the user question for keyword skip checking
           const question = getLatestUserQuestion(latest);
-          containerQuestions.set(latest, question);
+          state.containerQuestions.set(getContainerId(latest), question);
           if (question) log.streaming(`📝 Question: "${question.substring(0, 80)}"`);
 
           // Warm up connection immediately when streaming starts
-          if (autoSendFirstChunk) {
+          if (state.autoSendFirstChunk) {
             triggerPreconnect();
           }
 
           startStreamingObserver(latest);
         } else {
-          currentStreamingContainer = latest;
+          state.currentStreamingContainer = latest;
           processContainer(latest);
         }
       }
     } finally {
-      checkInProgress = false;
+      state.checkInProgress = false;
     }
   }
 
@@ -800,11 +835,12 @@
    */
   function startStreamingObserver(container) {
     // Prevent duplicate observers on the same container
-    if (activeStreamingObservers.has(container)) return;
-    activeStreamingObservers.add(container);
+    const containerId = getContainerId(container);
+    if (state.activeStreamingObservers.has(containerId)) return;
+    state.activeStreamingObservers.add(containerId);
 
     // Start live streaming the first chunk (runs independently)
-    if (extensionEnabled && autoSendFirstChunk && !autoSentContainers.has(container)) {
+    if (state.extensionEnabled && state.autoSendFirstChunk && !state.autoSentContainers.has(containerId)) {
       startLiveStream(container);
     }
 
@@ -814,7 +850,7 @@
       if (!isElementStreaming(container)) {
         log.streaming('✅ Streaming complete');
         observer.disconnect();
-        activeStreamingObservers.delete(container);
+        state.activeStreamingObservers.delete(containerId);
         setTimeout(() => processContainer(container), 200);
       }
     });
@@ -910,15 +946,16 @@
    */
   async function startLiveStream(container) {
     // Check skip keywords
-    const question = containerQuestions.get(container) || '';
+    const streamContainerId = getContainerId(container);
+    const question = state.containerQuestions.get(streamContainerId) || '';
     if (shouldSkipAutoSend(question)) {
       log.streaming('⏭️ Skipping live stream: keyword match');
-      autoSentContainers.add(container);
+      state.autoSentContainers.add(streamContainerId);
       return;
     }
 
     // Mark immediately to prevent duplicates
-    autoSentContainers.add(container);
+    state.autoSentContainers.add(streamContainerId);
 
     // Wait for first content element with enough text
     const firstElement = await waitForFirstElement(container, 10);
@@ -1005,7 +1042,7 @@
         text: finalText,
         isMultiPart: result.isMultiPart
       };
-      sentByHash.set(hashText(finalText), msgData);
+      state.sentByHash.set(hashText(finalText), msgData);
 
       // First chunk is always sent in full — no split threshold
       if (finalText !== lastSentText) {
@@ -1013,7 +1050,7 @@
       }
 
       if (firstElement.isConnected) {
-        sentMessages.set(firstElement, msgData);
+        state.sentMessages.set(firstElement, msgData);
 
         // Clean up streaming indicator, add action buttons
         const indicator = firstElement.querySelector('.persephone-streaming');
@@ -1057,7 +1094,7 @@
   // ============================================
 
   function openEditModal(element) {
-    const msgData = sentMessages.get(element);
+    const msgData = state.sentMessages.get(element);
     if (!msgData) {
       showToast('⚠️ Message data not found');
       return;
@@ -1132,12 +1169,12 @@
       if (success) {
         // Remove old hash, add new hash
         const oldHash = hashText(msgData.text);
-        sentByHash.delete(oldHash);
+        state.sentByHash.delete(oldHash);
 
         // Update stored text
         msgData.text = newText;
-        sentMessages.set(element, msgData);
-        sentByHash.set(hashText(newText), msgData);
+        state.sentMessages.set(element, msgData);
+        state.sentByHash.set(hashText(newText), msgData);
 
         closeEditModal();
         showToast('✓ Message updated');
@@ -1906,41 +1943,41 @@
     try {
       const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
       const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'autoSubmitVoice']);
-      extensionEnabled = settings.extensionEnabled !== false; // Default true
-      autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
-      autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
-      splitThreshold = settings.splitThreshold || 250;
-      autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
+      state.extensionEnabled = settings.extensionEnabled !== false; // Default true
+      state.autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
+      state.autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
+      state.splitThreshold = settings.splitThreshold || 250;
+      state.autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
 
       // Check for per-tab override (persisted in background)
       try {
         const tabOverride = await chrome.runtime.sendMessage({ type: 'GET_TAB_AUTO_SEND' });
         if (tabOverride?.hasOverride) {
-          autoSendFirstChunk = tabOverride.autoSend;
-          log.state(`🔌 Per-tab auto-send override: ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+          state.autoSendFirstChunk = tabOverride.autoSend;
+          log.state(`🔌 Per-tab auto-send override: ${state.autoSendFirstChunk ? 'ON' : 'OFF'}`);
         }
       } catch (e) {
         // Background not ready yet, use per-site default
       }
 
-      log.state(`🔌 Extension: ${extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${autoSendSkipKeywords.length}`);
+      log.state(`🔌 Extension: ${state.extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${state.autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${state.autoSendSkipKeywords.length}`);
     } catch (e) {
       log.state.error('Failed to load settings');
     }
   }
 
   function toggleExtensionEnabled() {
-    extensionEnabled = !extensionEnabled;
+    state.extensionEnabled = !state.extensionEnabled;
 
     // Save to storage
     if (isContextValid()) {
-      chrome.storage.sync.set({ extensionEnabled });
+      chrome.storage.sync.set({ extensionEnabled: state.extensionEnabled });
     }
 
     // Show indicator and update UI
-    showExtensionIndicator(extensionEnabled);
+    showExtensionIndicator(state.extensionEnabled);
 
-    if (extensionEnabled) {
+    if (state.extensionEnabled) {
       // Re-scan when enabled
       scanAllResponses();
     } else {
@@ -1948,7 +1985,7 @@
       removeAllButtons();
     }
 
-    log.state(`🔌 Extension toggled: ${extensionEnabled ? 'ON' : 'OFF'}`);
+    log.state(`🔌 Extension toggled: ${state.extensionEnabled ? 'ON' : 'OFF'}`);
   }
 
   function showExtensionIndicator(enabled) {
@@ -1986,16 +2023,16 @@
   }
 
   function toggleAutoSend() {
-    autoSendFirstChunk = !autoSendFirstChunk;
+    state.autoSendFirstChunk = !state.autoSendFirstChunk;
 
     // Persist per-tab override via background (survives refresh)
     if (isContextValid()) {
-      chrome.runtime.sendMessage({ type: 'SAVE_OWN_AUTO_SEND', autoSend: autoSendFirstChunk }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'SAVE_OWN_AUTO_SEND', autoSend: state.autoSendFirstChunk }).catch(() => {});
     }
 
-    showAutoSendIndicator(autoSendFirstChunk);
+    showAutoSendIndicator(state.autoSendFirstChunk);
     updateWidgetStates();
-    log.state(`⚡ Auto-send toggled (this tab): ${autoSendFirstChunk ? 'ON' : 'OFF'}`);
+    log.state(`⚡ Auto-send toggled (this tab): ${state.autoSendFirstChunk ? 'ON' : 'OFF'}`);
   }
 
   function showAutoSendIndicator(enabled) {
@@ -2032,7 +2069,6 @@
   // VOICE INPUT (MacWhisper)
   // ============================================
 
-  let micRecording = false;
 
   function isVisibleElement(el) {
     if (!el) return false;
@@ -2271,7 +2307,7 @@
           log.voice.error('🎙️ Broadcast send threw:', e);
         }
 
-        if (autoSubmitVoice) {
+        if (state.autoSubmitVoice) {
           // Focus input and poke the framework before submitting
           input.focus();
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2369,11 +2405,11 @@
     const input = findChatInput();
     if (input) input.focus();
 
-    if (!micRecording) {
+    if (!state.micRecording) {
       // Starting recording
       const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER' });
       if (result?.success) {
-        micRecording = true;
+        state.micRecording = true;
         micBtn.classList.add('recording');
         if (input) input.focus();
         log.voice('🎙️ Recording started');
@@ -2387,7 +2423,7 @@
 
       // refocus: true tells the native host to re-activate Chrome after F5
       const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER', refocus: true });
-      micRecording = false;
+      state.micRecording = false;
       micBtn.classList.remove('recording');
 
       // Re-focus input so MacWhisper types into it
@@ -2455,9 +2491,9 @@
    * Uses ImageCapture API for native-resolution grab, falls back to canvas.
    */
   async function captureFrame() {
-    if (!screenshotStream) return null;
+    if (!state.screenshotStream) return null;
 
-    const track = screenshotStream.getVideoTracks()[0];
+    const track = state.screenshotStream.getVideoTracks()[0];
     if (!track) return null;
 
     // Try ImageCapture.grabFrame() — gets raw frame at native resolution
@@ -2477,13 +2513,13 @@
     }
 
     // Fallback: draw from video element
-    if (!screenshotVideo) return null;
+    if (!state.screenshotVideo) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = screenshotVideo.videoWidth;
-    canvas.height = screenshotVideo.videoHeight;
+    canvas.width = state.screenshotVideo.videoWidth;
+    canvas.height = state.screenshotVideo.videoHeight;
     log.screenshot(`📸 Capture resolution (fallback): ${canvas.width}×${canvas.height}`);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(screenshotVideo, 0, 0);
+    ctx.drawImage(state.screenshotVideo, 0, 0);
     return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   }
 
@@ -2549,13 +2585,13 @@
    * Stop the active screenshot stream and clean up.
    */
   function stopScreenshotStream() {
-    if (screenshotStream) {
-      screenshotStream.getTracks().forEach(t => t.stop());
-      screenshotStream = null;
+    if (state.screenshotStream) {
+      state.screenshotStream.getTracks().forEach(t => t.stop());
+      state.screenshotStream = null;
     }
-    if (screenshotVideo) {
-      screenshotVideo.remove();
-      screenshotVideo = null;
+    if (state.screenshotVideo) {
+      state.screenshotVideo.remove();
+      state.screenshotVideo = null;
     }
     const btn = document.querySelector('.persephone-camera-btn');
     if (btn) btn.classList.remove('stream-active');
@@ -2572,16 +2608,16 @@
     const btn = document.querySelector('.persephone-camera-btn');
 
     // Alt+click to stop stream
-    if (e.altKey && screenshotStream) {
+    if (e.altKey && state.screenshotStream) {
       stopScreenshotStream();
       showToast('Screenshot stream stopped');
       return;
     }
 
     // If no active stream, start one
-    if (!screenshotStream) {
+    if (!state.screenshotStream) {
       try {
-        screenshotStream = await navigator.mediaDevices.getDisplayMedia({
+        state.screenshotStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
             width: { ideal: 3840 },
             height: { ideal: 2160 },
@@ -2594,26 +2630,26 @@
       }
 
       // Create hidden video element
-      screenshotVideo = document.createElement('video');
-      screenshotVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;';
-      screenshotVideo.srcObject = screenshotStream;
-      screenshotVideo.muted = true;
-      document.body.appendChild(screenshotVideo);
+      state.screenshotVideo = document.createElement('video');
+      state.screenshotVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;pointer-events:none;';
+      state.screenshotVideo.srcObject = state.screenshotStream;
+      state.screenshotVideo.muted = true;
+      document.body.appendChild(state.screenshotVideo);
 
       // Wait for video to be ready
       await new Promise((resolve) => {
-        screenshotVideo.onloadedmetadata = () => {
-          screenshotVideo.play().then(resolve).catch(resolve);
+        state.screenshotVideo.onloadedmetadata = () => {
+          state.screenshotVideo.play().then(resolve).catch(resolve);
         };
       });
 
       // Listen for user stopping the share from the Chrome bar
-      screenshotStream.getVideoTracks()[0].addEventListener('ended', () => {
+      state.screenshotStream.getVideoTracks()[0].addEventListener('ended', () => {
         stopScreenshotStream();
       });
 
       if (btn) btn.classList.add('stream-active');
-      const trackSettings = screenshotStream.getVideoTracks()[0].getSettings();
+      const trackSettings = state.screenshotStream.getVideoTracks()[0].getSettings();
       log.screenshot(`📸 Stream started — ${trackSettings.width}×${trackSettings.height} @ ${trackSettings.frameRate}fps`);
       showToast('Window selected — click again to capture');
       return;
@@ -2685,14 +2721,14 @@
     if (!panel || panel.classList.contains('hidden')) return;
 
     const extToggle = panel.querySelector('[data-key="extensionEnabled"]');
-    if (extToggle) extToggle.checked = extensionEnabled;
+    if (extToggle) extToggle.checked = state.extensionEnabled;
 
     const voiceToggle = panel.querySelector('[data-key="autoSubmitVoice"]');
-    if (voiceToggle) voiceToggle.checked = autoSubmitVoice;
+    if (voiceToggle) voiceToggle.checked = state.autoSubmitVoice;
 
     const thresholdInput = panel.querySelector('[data-key="splitThreshold"]');
     if (thresholdInput && document.activeElement !== thresholdInput) {
-      thresholdInput.value = splitThreshold;
+      thresholdInput.value = state.splitThreshold;
     }
   }
 
@@ -2724,8 +2760,8 @@
 
     // Simple toggle rows (extension + voice)
     const simpleRows = [
-      { label: 'Extension', key: 'extensionEnabled', get: () => extensionEnabled },
-      { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => autoSubmitVoice },
+      { label: 'Extension', key: 'extensionEnabled', get: () => state.extensionEnabled },
+      { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => state.autoSubmitVoice },
     ];
 
     simpleRows.forEach(({ label, key, get }) => {
@@ -2750,12 +2786,12 @@
       checkbox.addEventListener('change', () => {
         const val = checkbox.checked;
         if (key === 'extensionEnabled') {
-          extensionEnabled = val;
+          state.extensionEnabled = val;
           chrome.storage.sync.set({ extensionEnabled: val });
           showExtensionIndicator(val);
           if (val) { scanAllResponses(); } else { removeAllButtons(); }
         } else if (key === 'autoSubmitVoice') {
-          autoSubmitVoice = val;
+          state.autoSubmitVoice = val;
           chrome.storage.sync.set({ autoSubmitVoice: val });
         }
       });
@@ -2784,7 +2820,7 @@
     const thresholdInput = document.createElement('input');
     thresholdInput.type = 'number';
     thresholdInput.className = 'persephone-panel-input';
-    thresholdInput.value = splitThreshold;
+    thresholdInput.value = state.splitThreshold;
     thresholdInput.min = '50';
     thresholdInput.max = '2000';
     thresholdInput.setAttribute('data-key', 'splitThreshold');
@@ -2795,7 +2831,7 @@
       thresholdDebounce = setTimeout(() => {
         const val = parseInt(thresholdInput.value, 10);
         if (val && val >= 50) {
-          splitThreshold = val;
+          state.splitThreshold = val;
           chrome.storage.sync.set({ splitThreshold: val });
           log.ui.debug(`📝 Split threshold updated: ${val}`);
         }
@@ -2863,8 +2899,8 @@
             });
             if (tab.id === response.currentTabId) {
               // Also update locally for immediate effect
-              autoSendFirstChunk = checkbox.checked;
-              showAutoSendIndicator(autoSendFirstChunk);
+              state.autoSendFirstChunk = checkbox.checked;
+              showAutoSendIndicator(state.autoSendFirstChunk);
               updateWidgetStates();
             }
           });
@@ -2925,33 +2961,33 @@
       timestamp: new Date().toISOString(),
 
       settings: {
-        extensionEnabled,
-        autoSendFirstChunk,
-        splitThreshold,
-        autoSubmitVoice,
-        autoSendSkipKeywords,
+        extensionEnabled: state.extensionEnabled,
+        autoSendFirstChunk: state.autoSendFirstChunk,
+        splitThreshold: state.splitThreshold,
+        autoSubmitVoice: state.autoSubmitVoice,
+        autoSendSkipKeywords: state.autoSendSkipKeywords,
       },
 
       streaming: {
-        currentStreamingContainer: currentStreamingContainer
-          ? { connected: currentStreamingContainer.isConnected, streaming: isElementStreaming(currentStreamingContainer) }
+        currentStreamingContainer: state.currentStreamingContainer
+          ? { connected: state.currentStreamingContainer.isConnected, streaming: isElementStreaming(state.currentStreamingContainer) }
           : null,
-        lastContainerCount,
+        lastContainerCount: state.lastContainerCount,
         actualContainerCount: containers.length,
-        checkInProgress,
+        checkInProgress: state.checkInProgress,
       },
 
       tracking: {
-        seenTextsSize: seenTexts.size,
-        sentByHashSize: sentByHash.size,
-        sentByHashKeys: [...sentByHash.keys()],
-        sentMessagesSize: sentMessages.size,
-        pendingScreenshots: pendingScreenshots.length,
+        seenTextsSize: state.seenTexts.size,
+        sentByHashSize: state.sentByHash.size,
+        sentByHashKeys: [...state.sentByHash.keys()],
+        sentMessagesSize: state.sentMessages.size,
+        pendingScreenshots: state.pendingScreenshots.length,
       },
 
       media: {
-        screenshotStreamActive: !!screenshotStream,
-        micRecording,
+        screenshotStreamActive: !!state.screenshotStream,
+        micRecording: state.micRecording,
       },
 
       selectors: health.results.map(c => ({
@@ -3000,8 +3036,8 @@
 
     // Paste queued screenshots when tab becomes visible (Claude background tab workaround)
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && pendingScreenshots.length > 0) {
-        const queued = pendingScreenshots.splice(0);
+      if (document.visibilityState === 'visible' && state.pendingScreenshots.length > 0) {
+        const queued = state.pendingScreenshots.splice(0);
         log.screenshot(`📸 Tab visible — pasting ${queued.length} queued screenshot(s)`);
         // Small delay to let the tab fully activate and framework initialize
         setTimeout(async () => {
@@ -3047,13 +3083,13 @@
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Synchronous response required — must return true
       if (request.type === 'GET_AUTO_SEND_STATE') {
-        sendResponse({ autoSend: autoSendFirstChunk, site: SITE });
+        sendResponse({ autoSend: state.autoSendFirstChunk, site: SITE });
         return false;
       }
       if (request.type === 'EXTENSION_ENABLED_CHANGED') {
-        extensionEnabled = request.extensionEnabled;
-        showExtensionIndicator(extensionEnabled);
-        if (extensionEnabled) {
+        state.extensionEnabled = request.extensionEnabled;
+        showExtensionIndicator(state.extensionEnabled);
+        if (state.extensionEnabled) {
           scanAllResponses();
         } else {
           removeAllButtons();
@@ -3061,22 +3097,22 @@
         updateWidgetStates();
       }
       if (request.type === 'AUTO_SEND_CHANGED') {
-        autoSendFirstChunk = request.autoSendFirstChunk;
-        showAutoSendIndicator(autoSendFirstChunk);
+        state.autoSendFirstChunk = request.autoSendFirstChunk;
+        showAutoSendIndicator(state.autoSendFirstChunk);
         updateWidgetStates();
       }
       if (request.type === 'SKIP_KEYWORDS_CHANGED') {
-        autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
-        log.state.debug(`📝 Skip keywords updated: ${autoSendSkipKeywords.length} keywords`);
+        state.autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
+        log.state.debug(`📝 Skip keywords updated: ${state.autoSendSkipKeywords.length} keywords`);
       }
       if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
-        splitThreshold = request.splitThreshold || 250;
-        log.state.debug(`📝 Split threshold updated: ${splitThreshold}`);
+        state.splitThreshold = request.splitThreshold || 250;
+        log.state.debug(`📝 Split threshold updated: ${state.splitThreshold}`);
         updateWidgetStates();
       }
       if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
-        autoSubmitVoice = request.autoSubmitVoice === true;
-        log.voice.debug(`🎙️ Auto-submit voice: ${autoSubmitVoice ? 'ON' : 'OFF'}`);
+        state.autoSubmitVoice = request.autoSubmitVoice === true;
+        log.voice.debug(`🎙️ Auto-submit voice: ${state.autoSubmitVoice ? 'ON' : 'OFF'}`);
         updateWidgetStates();
       }
       if (request.type === 'INSERT_AND_SUBMIT') {
@@ -3089,7 +3125,7 @@
         // Claude rejects events entirely, Grok accepts them but Chrome throttles
         // rendering so DOM-based detection fails (causes double-paste).
         if (document.visibilityState !== 'visible') {
-          pendingScreenshots.push(blob);
+          state.pendingScreenshots.push(blob);
           log.screenshot('📸 Screenshot queued — will paste when tab becomes visible');
           sendResponse({ success: true });
           return true;
@@ -3105,8 +3141,8 @@
         return true;
       }
       if (request.type === 'SET_AUTO_SEND_STATE') {
-        autoSendFirstChunk = request.autoSend;
-        showAutoSendIndicator(autoSendFirstChunk);
+        state.autoSendFirstChunk = request.autoSend;
+        showAutoSendIndicator(state.autoSendFirstChunk);
         updateWidgetStates();
       }
     });
@@ -3117,16 +3153,16 @@
 
       if (changes.extensionEnabled) {
         const val = changes.extensionEnabled.newValue !== false;
-        if (val !== extensionEnabled) {
-          extensionEnabled = val;
+        if (val !== state.extensionEnabled) {
+          state.extensionEnabled = val;
           if (val) { scanAllResponses(); } else { removeAllButtons(); }
         }
       }
       if (changes.autoSubmitVoice) {
-        autoSubmitVoice = changes.autoSubmitVoice.newValue === true;
+        state.autoSubmitVoice = changes.autoSubmitVoice.newValue === true;
       }
       if (changes.splitThreshold) {
-        splitThreshold = changes.splitThreshold.newValue || 250;
+        state.splitThreshold = changes.splitThreshold.newValue || 250;
       }
       updateWidgetStates();
     });
@@ -3134,10 +3170,10 @@
     setTimeout(() => {
       // Set initial container count to avoid auto-sending existing responses
       const existingContainers = document.querySelectorAll(SELECTORS.responseContainer);
-      lastContainerCount = existingContainers.length;
+      state.lastContainerCount = existingContainers.length;
 
       const count = scanAllResponses();
-      log.init(`📋 Initial scan: ${count} buttons added, ${lastContainerCount} existing responses`);
+      log.init(`📋 Initial scan: ${count} buttons added, ${state.lastContainerCount} existing responses`);
 
       // Run selector health check after initial scan
       healthCheckWithToast();
