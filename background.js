@@ -3,6 +3,46 @@
 // v3.3 - Added settings caching and API preconnect for lower latency
 
 // ============================================
+// MESSAGE PROTOCOL CONSTANTS
+// ============================================
+
+const MSG = {
+  // Telegram operations
+  SEND_TO_TELEGRAM:   'SEND_TO_TELEGRAM',
+  EDIT_MESSAGE:       'EDIT_MESSAGE',
+  STREAM_EDIT:        'STREAM_EDIT',
+  DELETE_MESSAGE:     'DELETE_MESSAGE',
+  TEST_CONNECTION:    'TEST_CONNECTION',
+  PRECONNECT:         'PRECONNECT',
+  GET_STATS:          'GET_STATS',
+
+  // Tab management
+  GET_TAB_LIST:       'GET_TAB_LIST',
+  GET_TAB_AUTO_SEND:  'GET_TAB_AUTO_SEND',
+  SET_TAB_AUTO_SEND:  'SET_TAB_AUTO_SEND',
+  SAVE_OWN_AUTO_SEND: 'SAVE_OWN_AUTO_SEND',
+  GET_AUTO_SEND_STATE:'GET_AUTO_SEND_STATE',
+  SET_AUTO_SEND_STATE:'SET_AUTO_SEND_STATE',
+
+  // Broadcasting
+  BROADCAST_QUESTION:   'BROADCAST_QUESTION',
+  BROADCAST_SCREENSHOT: 'BROADCAST_SCREENSHOT',
+  INSERT_AND_SUBMIT:    'INSERT_AND_SUBMIT',
+  PASTE_SCREENSHOT:     'PASTE_SCREENSHOT',
+
+  // Settings (popup → content)
+  EXTENSION_ENABLED_CHANGED: 'EXTENSION_ENABLED_CHANGED',
+  AUTO_SEND_CHANGED:         'AUTO_SEND_CHANGED',
+  SKIP_KEYWORDS_CHANGED:     'SKIP_KEYWORDS_CHANGED',
+  SPLIT_THRESHOLD_CHANGED:   'SPLIT_THRESHOLD_CHANGED',
+  AUTO_SUBMIT_VOICE_CHANGED: 'AUTO_SUBMIT_VOICE_CHANGED',
+
+  // Features
+  TOGGLE_WHISPER: 'TOGGLE_WHISPER',
+  GET_CLIPBOARD:  'GET_CLIPBOARD',
+};
+
+// ============================================
 // STRUCTURED LOGGER
 // ============================================
 
@@ -93,7 +133,7 @@ async function sendScreenshotToTabWithRetry(tab, dataUrl, maxAttempts = 6) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'PASTE_SCREENSHOT',
+        type: MSG.PASTE_SCREENSHOT,
         dataUrl
       });
 
@@ -252,8 +292,31 @@ async function getClipboard() {
 // MESSAGE HANDLERS
 // ============================================
 
+const KNOWN_MSG_TYPES = new Set(Object.values(MSG));
+
+function validateMessage(request) {
+  if (!request || typeof request.type !== 'string') return 'missing or invalid type';
+  if (!KNOWN_MSG_TYPES.has(request.type)) return `unknown type: ${request.type}`;
+  // Type-specific required fields
+  if (request.type === MSG.SEND_TO_TELEGRAM && typeof request.text !== 'string') return 'SEND_TO_TELEGRAM requires text';
+  if (request.type === MSG.EDIT_MESSAGE && (!request.messageId || typeof request.text !== 'string')) return 'EDIT_MESSAGE requires messageId and text';
+  if (request.type === MSG.STREAM_EDIT && (!request.messageId || typeof request.text !== 'string')) return 'STREAM_EDIT requires messageId and text';
+  if (request.type === MSG.DELETE_MESSAGE && !request.messageId) return 'DELETE_MESSAGE requires messageId';
+  if (request.type === MSG.TEST_CONNECTION && (!request.botToken || !request.chatId)) return 'TEST_CONNECTION requires botToken and chatId';
+  if (request.type === MSG.SET_TAB_AUTO_SEND && (request.tabId == null || request.autoSend == null)) return 'SET_TAB_AUTO_SEND requires tabId and autoSend';
+  if (request.type === MSG.BROADCAST_SCREENSHOT && !request.dataUrl) return 'BROADCAST_SCREENSHOT requires dataUrl';
+  return null;
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'TEST_CONNECTION') {
+  const validationError = validateMessage(request);
+  if (validationError) {
+    log.settings.warn('Invalid message:', validationError, request);
+    sendResponse({ success: false, error: validationError });
+    return false;
+  }
+
+  if (request.type === MSG.TEST_CONNECTION) {
     sendTestMessage(request.botToken, request.chatId)
       .then(result => {
         // Update cache with new credentials after successful test
@@ -269,49 +332,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === 'SEND_TO_TELEGRAM') {
+  if (request.type === MSG.SEND_TO_TELEGRAM) {
     handleSendToTelegram(request.text)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
-  if (request.type === 'EDIT_MESSAGE') {
+  if (request.type === MSG.EDIT_MESSAGE) {
     handleEditMessage(request.messageId, request.text)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
-  if (request.type === 'STREAM_EDIT') {
+  if (request.type === MSG.STREAM_EDIT) {
     handleStreamEdit(request.messageId, request.text)
       .then(result => sendResponse(result))
       .catch(() => sendResponse({ success: false }));
     return true;
   }
 
-  if (request.type === 'DELETE_MESSAGE') {
+  if (request.type === MSG.DELETE_MESSAGE) {
     handleDeleteMessage(request.messageId)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
-  if (request.type === 'TOGGLE_WHISPER') {
+  if (request.type === MSG.TOGGLE_WHISPER) {
     toggleWhisper(request.refocus || false)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
-  if (request.type === 'GET_CLIPBOARD') {
+  if (request.type === MSG.GET_CLIPBOARD) {
     getClipboard()
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
-  if (request.type === 'BROADCAST_QUESTION') {
+  if (request.type === MSG.BROADCAST_QUESTION) {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
     log.broadcast('Broadcasting question to other tabs, sender:', senderTabId);
@@ -321,7 +384,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (tab.id !== senderTabId) {
           log.broadcast('Sending INSERT_AND_SUBMIT to tab:', tab.id, tab.url);
           chrome.tabs.sendMessage(tab.id, {
-            type: 'INSERT_AND_SUBMIT',
+            type: MSG.INSERT_AND_SUBMIT,
             text: request.text
           }).catch(err => log.broadcast.error('Failed to send to tab:', tab.id, err));
         }
@@ -331,7 +394,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === 'GET_TAB_LIST') {
+  if (request.type === MSG.GET_TAB_LIST) {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
     chrome.tabs.query({ url: TAB_URLS }, async (tabs) => {
@@ -340,7 +403,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Use persisted override if available, otherwise query the tab
         const override = tabAutoSendOverrides[tab.id];
         try {
-          const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_AUTO_SEND_STATE' });
+          const response = await chrome.tabs.sendMessage(tab.id, { type: MSG.GET_AUTO_SEND_STATE });
           tabList.push({
             id: tab.id,
             title: tab.title || '',
@@ -363,26 +426,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === 'SET_TAB_AUTO_SEND') {
+  if (request.type === MSG.SET_TAB_AUTO_SEND) {
     // Persist the override so it survives tab refresh
     tabAutoSendOverrides[request.tabId] = request.autoSend;
     saveTabOverrides();
     chrome.tabs.sendMessage(request.tabId, {
-      type: 'SET_AUTO_SEND_STATE',
+      type: MSG.SET_AUTO_SEND_STATE,
       autoSend: request.autoSend
     }).then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (request.type === 'GET_TAB_AUTO_SEND') {
+  if (request.type === MSG.GET_TAB_AUTO_SEND) {
     const tabId = sender.tab?.id;
     const override = tabId != null ? tabAutoSendOverrides[tabId] : undefined;
     sendResponse({ hasOverride: override !== undefined, autoSend: override });
     return false;
   }
 
-  if (request.type === 'SAVE_OWN_AUTO_SEND') {
+  if (request.type === MSG.SAVE_OWN_AUTO_SEND) {
     const tabId = sender.tab?.id;
     if (tabId != null) {
       tabAutoSendOverrides[tabId] = request.autoSend;
@@ -392,7 +455,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
-  if (request.type === 'BROADCAST_SCREENSHOT') {
+  if (request.type === MSG.BROADCAST_SCREENSHOT) {
     const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
     const senderTabId = sender.tab?.id;
     log.screenshot('Broadcasting screenshot to other tabs, sender:', senderTabId);
@@ -414,17 +477,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === 'GET_STATS') {
+  if (request.type === MSG.GET_STATS) {
     // Return from cache immediately
     sendResponse({ messageCount: settingsCache.messageCount });
     return false; // Synchronous response
   }
   
-  if (request.type === 'PRECONNECT') {
+  if (request.type === MSG.PRECONNECT) {
     preconnectTelegramAPI();
     sendResponse({ success: true });
     return false;
   }
+
+  // Catch-all: message type passed validation but has no handler
+  log.settings.warn('Unhandled message type:', request.type);
+  sendResponse({ success: false, error: `No handler for ${request.type}` });
+  return false;
 });
 
 async function sendTestMessage(botToken, chatId) {

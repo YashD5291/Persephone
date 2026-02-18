@@ -8,6 +8,46 @@
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
 
   // ============================================
+  // MESSAGE PROTOCOL CONSTANTS
+  // ============================================
+
+  const MSG = {
+    // Telegram operations
+    SEND_TO_TELEGRAM:   'SEND_TO_TELEGRAM',
+    EDIT_MESSAGE:       'EDIT_MESSAGE',
+    STREAM_EDIT:        'STREAM_EDIT',
+    DELETE_MESSAGE:     'DELETE_MESSAGE',
+    TEST_CONNECTION:    'TEST_CONNECTION',
+    PRECONNECT:         'PRECONNECT',
+    GET_STATS:          'GET_STATS',
+
+    // Tab management
+    GET_TAB_LIST:       'GET_TAB_LIST',
+    GET_TAB_AUTO_SEND:  'GET_TAB_AUTO_SEND',
+    SET_TAB_AUTO_SEND:  'SET_TAB_AUTO_SEND',
+    SAVE_OWN_AUTO_SEND: 'SAVE_OWN_AUTO_SEND',
+    GET_AUTO_SEND_STATE:'GET_AUTO_SEND_STATE',
+    SET_AUTO_SEND_STATE:'SET_AUTO_SEND_STATE',
+
+    // Broadcasting
+    BROADCAST_QUESTION:   'BROADCAST_QUESTION',
+    BROADCAST_SCREENSHOT: 'BROADCAST_SCREENSHOT',
+    INSERT_AND_SUBMIT:    'INSERT_AND_SUBMIT',
+    PASTE_SCREENSHOT:     'PASTE_SCREENSHOT',
+
+    // Settings (popup → content)
+    EXTENSION_ENABLED_CHANGED: 'EXTENSION_ENABLED_CHANGED',
+    AUTO_SEND_CHANGED:         'AUTO_SEND_CHANGED',
+    SKIP_KEYWORDS_CHANGED:     'SKIP_KEYWORDS_CHANGED',
+    SPLIT_THRESHOLD_CHANGED:   'SPLIT_THRESHOLD_CHANGED',
+    AUTO_SUBMIT_VOICE_CHANGED: 'AUTO_SUBMIT_VOICE_CHANGED',
+
+    // Features
+    TOGGLE_WHISPER: 'TOGGLE_WHISPER',
+    GET_CLIPBOARD:  'GET_CLIPBOARD',
+  };
+
+  // ============================================
   // CENTRALIZED STATE
   // ============================================
 
@@ -993,7 +1033,7 @@
     if (!isContextValid()) return;
     try {
       chrome.runtime.sendMessage({
-        type: 'STREAM_EDIT',
+        type: MSG.STREAM_EDIT,
         messageId: messageId,
         text: text
       }).catch(() => {});
@@ -1335,7 +1375,7 @@
     if (!isContextValid()) return;
     
     try {
-      chrome.runtime.sendMessage({ type: 'PRECONNECT' });
+      chrome.runtime.sendMessage({ type: MSG.PRECONNECT });
       log.telegram('🔌 Preconnect triggered');
     } catch (e) {
       // Ignore errors
@@ -1350,7 +1390,7 @@
     
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'SEND_TO_TELEGRAM',
+        type: MSG.SEND_TO_TELEGRAM,
         text: text
       });
       
@@ -1383,7 +1423,7 @@
     
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'EDIT_MESSAGE',
+        type: MSG.EDIT_MESSAGE,
         messageId: messageId,
         text: newText
       });
@@ -1411,7 +1451,7 @@
     
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'DELETE_MESSAGE',
+        type: MSG.DELETE_MESSAGE,
         messageId: messageId
       });
       
@@ -2070,7 +2110,7 @@
 
       // Check for per-tab override (persisted in background)
       try {
-        const tabOverride = await chrome.runtime.sendMessage({ type: 'GET_TAB_AUTO_SEND' });
+        const tabOverride = await chrome.runtime.sendMessage({ type: MSG.GET_TAB_AUTO_SEND });
         if (tabOverride?.hasOverride) {
           state.autoSendFirstChunk = tabOverride.autoSend;
           log.state(`🔌 Per-tab auto-send override: ${state.autoSendFirstChunk ? 'ON' : 'OFF'}`);
@@ -2146,7 +2186,7 @@
 
     // Persist per-tab override via background (survives refresh)
     if (isContextValid()) {
-      chrome.runtime.sendMessage({ type: 'SAVE_OWN_AUTO_SEND', autoSend: state.autoSendFirstChunk }).catch(() => {});
+      chrome.runtime.sendMessage({ type: MSG.SAVE_OWN_AUTO_SEND, autoSend: state.autoSendFirstChunk }).catch(() => {});
     }
 
     showAutoSendIndicator(state.autoSendFirstChunk);
@@ -2419,7 +2459,7 @@
         // Broadcast to other Grok/Claude tabs BEFORE submitting locally
         log.voice('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
         try {
-          chrome.runtime.sendMessage({ type: 'BROADCAST_QUESTION', text: current })
+          chrome.runtime.sendMessage({ type: MSG.BROADCAST_QUESTION, text: current })
             .then(r => log.voice('🎙️ Broadcast response:', r))
             .catch(err => log.voice.error('🎙️ Broadcast error:', err));
         } catch (e) {
@@ -2526,7 +2566,7 @@
 
     if (!state.micRecording) {
       // Starting recording
-      const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER' });
+      const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER });
       if (result?.success) {
         state.micRecording = true;
         micBtn.classList.add('recording');
@@ -2541,7 +2581,7 @@
       const inputBefore = input ? getInputValue(input).trim() : '';
 
       // refocus: true tells the native host to re-activate Chrome after F5
-      const result = await chrome.runtime.sendMessage({ type: 'TOGGLE_WHISPER', refocus: true });
+      const result = await chrome.runtime.sendMessage({ type: MSG.TOGGLE_WHISPER, refocus: true });
       state.micRecording = false;
       micBtn.classList.remove('recording');
 
@@ -2796,7 +2836,7 @@
     // Broadcast to other tabs (paste only, no submit)
     blobToDataUrl(blob).then(dataUrl => {
       try {
-        chrome.runtime.sendMessage({ type: 'BROADCAST_SCREENSHOT', dataUrl })
+        chrome.runtime.sendMessage({ type: MSG.BROADCAST_SCREENSHOT, dataUrl })
           .catch(err => log.screenshot.error('📸 Broadcast error:', err));
       } catch (e) {
         log.screenshot.error('📸 Broadcast send threw:', e);
@@ -2965,7 +3005,7 @@
     async function fetchAndRenderTabs() {
       tabListContainer.innerHTML = '<div class="persephone-tab-loading">Loading...</div>';
       try {
-        const response = await chrome.runtime.sendMessage({ type: 'GET_TAB_LIST' });
+        const response = await chrome.runtime.sendMessage({ type: MSG.GET_TAB_LIST });
         if (!response?.tabs) {
           tabListContainer.innerHTML = '<div class="persephone-tab-loading">No tabs found</div>';
           return;
@@ -3012,7 +3052,7 @@
           checkbox.addEventListener('change', () => {
             // Always persist via background (survives tab refresh)
             chrome.runtime.sendMessage({
-              type: 'SET_TAB_AUTO_SEND',
+              type: MSG.SET_TAB_AUTO_SEND,
               tabId: tab.id,
               autoSend: checkbox.checked
             });
@@ -3201,11 +3241,11 @@
     // Listen for messages from popup and background
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Synchronous response required — must return true
-      if (request.type === 'GET_AUTO_SEND_STATE') {
+      if (request.type === MSG.GET_AUTO_SEND_STATE) {
         sendResponse({ autoSend: state.autoSendFirstChunk, site: SITE });
         return false;
       }
-      if (request.type === 'EXTENSION_ENABLED_CHANGED') {
+      if (request.type === MSG.EXTENSION_ENABLED_CHANGED) {
         state.extensionEnabled = request.extensionEnabled;
         showExtensionIndicator(state.extensionEnabled);
         if (state.extensionEnabled) {
@@ -3215,29 +3255,29 @@
         }
         updateWidgetStates();
       }
-      if (request.type === 'AUTO_SEND_CHANGED') {
+      if (request.type === MSG.AUTO_SEND_CHANGED) {
         state.autoSendFirstChunk = request.autoSendFirstChunk;
         showAutoSendIndicator(state.autoSendFirstChunk);
         updateWidgetStates();
       }
-      if (request.type === 'SKIP_KEYWORDS_CHANGED') {
+      if (request.type === MSG.SKIP_KEYWORDS_CHANGED) {
         state.autoSendSkipKeywords = request.keywords || [...DEFAULT_SKIP_KEYWORDS];
         log.state.debug(`📝 Skip keywords updated: ${state.autoSendSkipKeywords.length} keywords`);
       }
-      if (request.type === 'SPLIT_THRESHOLD_CHANGED') {
+      if (request.type === MSG.SPLIT_THRESHOLD_CHANGED) {
         state.splitThreshold = request.splitThreshold || 250;
         log.state.debug(`📝 Split threshold updated: ${state.splitThreshold}`);
         updateWidgetStates();
       }
-      if (request.type === 'AUTO_SUBMIT_VOICE_CHANGED') {
+      if (request.type === MSG.AUTO_SUBMIT_VOICE_CHANGED) {
         state.autoSubmitVoice = request.autoSubmitVoice === true;
         log.voice.debug(`🎙️ Auto-submit voice: ${state.autoSubmitVoice ? 'ON' : 'OFF'}`);
         updateWidgetStates();
       }
-      if (request.type === 'INSERT_AND_SUBMIT') {
+      if (request.type === MSG.INSERT_AND_SUBMIT) {
         insertTextAndSubmit(request.text, { focusInput: false });
       }
-      if (request.type === 'PASTE_SCREENSHOT') {
+      if (request.type === MSG.PASTE_SCREENSHOT) {
         const blob = dataUrlToBlob(request.dataUrl);
 
         // Background tabs: queue immediately. Synthetic paste is unreliable —
@@ -3259,7 +3299,7 @@
         });
         return true;
       }
-      if (request.type === 'SET_AUTO_SEND_STATE') {
+      if (request.type === MSG.SET_AUTO_SEND_STATE) {
         state.autoSendFirstChunk = request.autoSend;
         showAutoSendIndicator(state.autoSendFirstChunk);
         updateWidgetStates();
