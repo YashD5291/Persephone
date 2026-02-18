@@ -38,7 +38,7 @@
     // Streaming detection
     currentStreamingContainer: null,
     lastContainerCount: 0,
-    checkInProgress: false,
+    streamingLocks: new Set(),  // Set<containerId> — prevents re-entrant processing per container
 
     // Tracking maps
     seenTexts: new Set(),
@@ -845,14 +845,18 @@
    */
   function checkForNewResponse() {
     if (!state.extensionEnabled) return;
-    if (state.checkInProgress) return;
-    state.checkInProgress = true;
+
+    const containers = sel.queryAll('responseContainer');
+    if (containers.length === 0) return;
+
+    const latest = containers[containers.length - 1];
+    const containerId = getContainerId(latest);
+
+    // Per-container lock: prevents re-entrant processing from overlapping callbacks
+    if (state.streamingLocks.has(containerId)) return;
+    state.streamingLocks.add(containerId);
 
     try {
-      const containers = sel.queryAll('responseContainer');
-      if (containers.length === 0) return;
-
-      const latest = containers[containers.length - 1];
       const isNewContainer = containers.length > state.lastContainerCount;
       const isStreaming = isElementStreaming(latest);
 
@@ -866,7 +870,7 @@
 
           // Capture the user question for keyword skip checking
           const question = getLatestUserQuestion(latest);
-          state.containerQuestions.set(getContainerId(latest), question);
+          state.containerQuestions.set(containerId, question);
           if (question) log.streaming(`📝 Question: "${question.substring(0, 80)}"`);
 
           // Warm up connection immediately when streaming starts
@@ -881,7 +885,7 @@
         }
       }
     } finally {
-      state.checkInProgress = false;
+      state.streamingLocks.delete(containerId);
     }
   }
 
@@ -1144,17 +1148,25 @@
       if (!finalText || finalText.length < 5) return;
 
       // Store in maps BEFORE the async edit so DOM rebuild can find sent state
+      const finalHash = hashText(finalText);
       const msgData = {
         messageId,
         text: finalText,
-        isMultiPart: result.isMultiPart
+        isMultiPart: result.isMultiPart,
+        status: 'pending'
       };
-      state.sentByHash.set(hashText(finalText), msgData);
+      state.sentByHash.set(finalHash, msgData);
 
       // First chunk is always sent in full — no split threshold
       if (finalText !== lastSentText) {
-        await editInTelegram(messageId, finalText);
+        const editOk = await editInTelegram(messageId, finalText);
+        if (!editOk) {
+          log.streaming.warn('⚠️ Live stream: final edit failed');
+          state.sentByHash.delete(finalHash);
+          return;
+        }
       }
+      msgData.status = 'sent';
 
       if (firstElement.isConnected) {
         state.sentMessages.set(firstElement, msgData);
@@ -3081,7 +3093,7 @@
           : null,
         lastContainerCount: state.lastContainerCount,
         actualContainerCount: containers.length,
-        checkInProgress: state.checkInProgress,
+        streamingLocks: [...state.streamingLocks],
       },
 
       tracking: {
@@ -3127,7 +3139,7 @@
   // INIT
   // ============================================
 
-  function init() {
+  async function init() {
     log.init('🚀 Persephone v3.8 (with screenshot capture)');
 
     injectStyles();
@@ -3135,8 +3147,8 @@
     injectSettingsWidget();
     injectScreenshotButton();
 
-    // Load settings
-    loadSettings();
+    // Load settings — await so observers start with correct state
+    await loadSettings();
 
     // Trigger API preconnect immediately
     triggerPreconnect();
@@ -3274,39 +3286,37 @@
       updateWidgetStates();
     });
 
-    setTimeout(() => {
-      // Set initial container count to avoid auto-sending existing responses
-      const existingContainers = sel.queryAll('responseContainer');
-      state.lastContainerCount = existingContainers.length;
+    // Set initial container count to avoid auto-sending existing responses
+    const existingContainers = sel.queryAll('responseContainer');
+    state.lastContainerCount = existingContainers.length;
 
-      const count = scanAllResponses();
-      log.init(`📋 Initial scan: ${count} buttons added, ${state.lastContainerCount} existing responses`);
+    const count = scanAllResponses();
+    log.init(`📋 Initial scan: ${count} buttons added, ${state.lastContainerCount} existing responses`);
 
-      // Run selector health check after initial scan
-      healthCheckWithToast();
+    // Run selector health check after initial scan
+    healthCheckWithToast();
 
-      // Start global observer for immediate detection of new responses
-      startGlobalObserver();
+    // Start global observer for immediate detection of new responses
+    startGlobalObserver();
 
-      // Fallback polling (MutationObserver is primary; this is a safety net)
-      let lastPollCheck = 0;
-      let healthCheckRuns = 0;
-      setInterval(() => {
-        scanAllResponses();
-        const now = Date.now();
-        if (now - lastPollCheck >= 2000) {
-          lastPollCheck = now;
-          checkForNewResponse();
-        }
-        // Re-run health check every ~30s (15th run of 2s interval)
-        healthCheckRuns++;
-        if (healthCheckRuns % 15 === 0) {
-          healthCheckWithToast();
-        }
-      }, 2000);
+    // Fallback polling (MutationObserver is primary; this is a safety net)
+    let lastPollCheck = 0;
+    let healthCheckRuns = 0;
+    setInterval(() => {
+      scanAllResponses();
+      const now = Date.now();
+      if (now - lastPollCheck >= 2000) {
+        lastPollCheck = now;
+        checkForNewResponse();
+      }
+      // Re-run health check every ~30s (15th run of 2s interval)
+      healthCheckRuns++;
+      if (healthCheckRuns % 15 === 0) {
+        healthCheckWithToast();
+      }
+    }, 2000);
 
-      log.init('✅ Ready');
-    }, 500);
+    log.init('✅ Ready');
   }
 
   init();
