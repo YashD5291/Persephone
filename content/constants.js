@@ -1,0 +1,49 @@
+(function() {
+  'use strict';
+  const P = window.Persephone = window.Persephone || {};
+
+  const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
+
+  // ============================================
+  // MESSAGE PROTOCOL CONSTANTS
+  // ============================================
+
+  const MSG = {
+    // Telegram operations
+    SEND_TO_TELEGRAM:   'SEND_TO_TELEGRAM',
+    EDIT_MESSAGE:       'EDIT_MESSAGE',
+    STREAM_EDIT:        'STREAM_EDIT',
+    DELETE_MESSAGE:     'DELETE_MESSAGE',
+    TEST_CONNECTION:    'TEST_CONNECTION',
+    PRECONNECT:         'PRECONNECT',
+    GET_STATS:          'GET_STATS',
+
+    // Tab management
+    GET_TAB_LIST:       'GET_TAB_LIST',
+    GET_TAB_AUTO_SEND:  'GET_TAB_AUTO_SEND',
+    SET_TAB_AUTO_SEND:  'SET_TAB_AUTO_SEND',
+    SAVE_OWN_AUTO_SEND: 'SAVE_OWN_AUTO_SEND',
+    GET_AUTO_SEND_STATE:'GET_AUTO_SEND_STATE',
+    SET_AUTO_SEND_STATE:'SET_AUTO_SEND_STATE',
+
+    // Broadcasting
+    BROADCAST_QUESTION:   'BROADCAST_QUESTION',
+    BROADCAST_SCREENSHOT: 'BROADCAST_SCREENSHOT',
+    INSERT_AND_SUBMIT:    'INSERT_AND_SUBMIT',
+    PASTE_SCREENSHOT:     'PASTE_SCREENSHOT',
+
+    // Settings (popup → content)
+    EXTENSION_ENABLED_CHANGED: 'EXTENSION_ENABLED_CHANGED',
+    AUTO_SEND_CHANGED:         'AUTO_SEND_CHANGED',
+    SKIP_KEYWORDS_CHANGED:     'SKIP_KEYWORDS_CHANGED',
+    SPLIT_THRESHOLD_CHANGED:   'SPLIT_THRESHOLD_CHANGED',
+    AUTO_SUBMIT_VOICE_CHANGED: 'AUTO_SUBMIT_VOICE_CHANGED',
+
+    // Features
+    TOGGLE_WHISPER: 'TOGGLE_WHISPER',
+    GET_CLIPBOARD:  'GET_CLIPBOARD',
+  };
+
+  // --- Exports ---
+  Object.assign(P, { DEFAULT_SKIP_KEYWORDS, MSG });
+})();

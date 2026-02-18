@@ -32,7 +32,21 @@
   "content_scripts": [
     {
       "matches": ["https://grok.com/*", "https://x.com/i/grok*", "https://claude.ai/*"],
-      "js": ["content.js"],
+      "js": [
+        "content/constants.js",
+        "content/logger.js",
+        "content/state.js",
+        "content/selectors.js",
+        "content/text.js",
+        "content/telegram.js",
+        "content/buttons.js",
+        "content/streaming.js",
+        "content/voice.js",
+        "content/screenshot.js",
+        "content/widget.js",
+        "content/styles.js",
+        "content/init.js"
+      ],
       "run_at": "document_idle"
     }
   ]
