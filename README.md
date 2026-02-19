@@ -9,7 +9,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Initial text is sent immediately, then the Telegram message is edited every 500ms as more words appear
 - Final edit applies full Markdown formatting once the paragraph is complete
 - Blue pulsing indicator shows which paragraph is actively streaming
-- First chunk is always sent in full regardless of length (no splitting)
+- **First chunk word limit** — configurable word count (default 42) at which the auto-streamed first chunk splits into two Telegram messages. Adjustable in the popup and floating widget
 
 ### Auto-Send First Chunk
 - **Enabled by default** - automatically live-streams the first paragraph/heading when the AI starts responding
@@ -48,7 +48,9 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Uses Chrome Native Messaging to trigger MacWhisper's F5 shortcut via a local Python host
 - MacWhisper transcribes speech and types directly into the focused chat input
 - **Auto-submit**: optionally submits the transcribed text immediately when recording stops (ideal for meetings)
+- **Auto-restart mic**: optionally re-activates the mic after a configurable delay (default 3s) following auto-submit, enabling continuous hands-free dictation across multiple questions
 - **Broadcast to all tabs**: when auto-submit is on, the transcribed question is sent to all open Grok/Claude tabs simultaneously without switching your active tab (great for split-view comparison)
+- **Race condition guard**: rapid mic clicks are safely ignored while a toggle is in-flight, preventing state desync between the button UI and actual MacWhisper recording state
 - Keyboard shortcut: `Alt+M` to toggle recording
 - Mic button turns red and pulses while recording
 
@@ -67,7 +69,9 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - **Gear button** in the bottom-right corner of Grok/Claude pages — click to open the settings panel
 - **Extension toggle** — enable/disable Persephone without opening the popup
 - **Voice auto-submit toggle** — turn auto-submit on/off directly from the page
+- **Voice auto-restart toggle** — re-activate mic after voice submit, with configurable delay
 - **Tab list with per-tab auto-send** — shows all open Grok/Claude tabs with their site badge (C/G), title, and individual auto-send toggles. Per-tab settings persist across page refreshes
+- **Tab connectivity indicators** — green dot for reachable tabs, grey dot for stale/unreachable tabs (reload to reconnect)
 - Current tab marked with "(here)" label
 - **Split threshold** — adjust the sub-chunk split threshold inline
 - Click outside the panel to close it
@@ -196,7 +200,7 @@ Claude restructures its DOM when streaming completes — Persephone handles this
                               │
                               v New streaming response detected
 ┌──────────────────────────────────────────────────────────────────┐
-│  STREAMING OBSERVER (per-container MutationObserver)              │
+│  STREAMING OBSERVER (per-container MutationObserver)             │
 │  - Watches childList, subtree, characterData changes             │
 │  - Claude: also watches data-is-streaming attribute              │
 │  - Processes elements as they complete                           │
@@ -204,42 +208,44 @@ Claude restructures its DOM when streaming completes — Persephone handles this
 └──────────────────────────────────────────────────────────────────┘
           │                                        │
           v Auto-send enabled                      v Manual send
-┌──────────────────────────┐    ┌──────────────────────────────────┐
+┌───────────────────────────┐    ┌──────────────────────────────────┐
 │  LIVE STREAM              │    │  BUTTON CLICK                    │
 │  - sendMessage (initial)  │    │  - sendMessage (full text)       │
 │  - editMessageText @500ms │    │  - Replace with action buttons   │
 │  - Final edit w/ markdown │    └──────────────────────────────────┘
 │  - Track via text anchor  │
-└──────────────────────────┘
+└───────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│  SCREENSHOT CAPTURE (getDisplayMedia)                              │
-│  - Camera button click → getDisplayMedia() → select window         │
-│  - Stream kept open → subsequent clicks capture instantly           │
-│  - Frame drawn to canvas → PNG blob → clipboard + synthetic paste   │
-│  - Blob → dataURL → BROADCAST_SCREENSHOT → queued per tab            │
-│  - Background tabs: deferred paste on visibilitychange               │
-│  - Alt+click or Chrome "Stop sharing" → cleanup stream              │
+│  SCREENSHOT CAPTURE (getDisplayMedia)                            │
+│  - Camera button click → getDisplayMedia() → select window       │
+│  - Stream kept open → subsequent clicks capture instantly        │
+│  - Frame drawn to canvas → PNG blob → clipboard + synthetic paste│
+│  - Blob → dataURL → BROADCAST_SCREENSHOT → queued per tab        │
+│  - Background tabs: deferred paste on visibilitychange           │
+│  - Alt+click or Chrome "Stop sharing" → cleanup stream           │
 └──────────────────────────────────────────────────────────────────┘
 
-┌──────────────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────────────┐
 │  VOICE INPUT (MacWhisper via Native Messaging)                    │
 │  - Mic button click → focus chat input → TOGGLE_WHISPER           │
 │  - background.js → sendNativeMessage → persephone_host.py         │
 │  - Python host simulates F5 keypress via osascript                │
 │  - MacWhisper transcribes and types into focused input            │
 │  - Stop recording → poll input for text → auto-submit (optional)  │
-│  - BROADCAST_QUESTION → insert + submit in all other tabs          │
-└──────────────────────────────────────────────────────────────────┘
+│  - Auto-restart: setTimeout → handleMicClick() after delay        │
+│  - Re-entrancy guard prevents rapid-click state desync            │
+│  - BROADCAST_QUESTION → insert + submit in all other tabs         │
+└───────────────────────────────────────────────────────────────────┘
 
-┌──────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────┐
 │  FLOATING SETTINGS WIDGET (gear button)                            │
 │  - Extension toggle, voice auto-submit toggle                      │
 │  - Tab list: GET_TAB_LIST → background queries all matching tabs   │
 │  - Per-tab auto-send toggles (SET_TAB_AUTO_SEND to other tabs)     │
 │  - Split threshold input (debounced save)                          │
 │  - Syncs with popup and storage changes in real time               │
-└──────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -327,7 +333,10 @@ Content is converted to Telegram Markdown:
 | Chat ID | — | Telegram chat/user ID |
 | Enable Extension | ON | Master toggle (also via Cmd/Ctrl+Shift+E) |
 | Auto-submit voice input | OFF | Automatically submit transcribed text when recording stops |
+| Auto-restart mic | OFF | Re-activate mic after voice submit for continuous dictation |
+| Mic restart delay | 3 | Seconds to wait before re-activating mic (1-30) |
 | Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
+| First chunk split (words) | 42 | Word count at which the auto-streamed first chunk splits into two messages |
 | Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
 
 ## Widget Settings (on-page)
@@ -336,8 +345,11 @@ Content is converted to Telegram Markdown:
 |---------|-------------|
 | Extension | Master toggle (same as popup) |
 | Voice auto-submit | Toggle auto-submit for voice input |
+| Voice auto-restart | Toggle mic auto-restart after voice submit |
 | Auto-send (per tab) | Toggle auto-send individually for each open Grok/Claude tab |
 | Split threshold | Adjust sub-chunk split threshold |
+| 1st chunk words | Adjust first chunk word limit |
+| Restart delay (s) | Adjust mic restart delay |
 
 ## Troubleshooting
 
@@ -384,6 +396,8 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v5.2** - Voice auto-restart mic (re-activate after voice submit with configurable delay), mic button race condition fix (re-entrancy guard prevents rapid-click state desync)
+- **v5.1** - First chunk word limit (configurable split point for auto-streamed first chunk), tab connectivity indicators (green/grey dots for reachable/stale tabs), selector health check improvements
 - **v5.0** - Production hardening: modular file split (content.js → 13 modules, background.js → 7 modules), structured logging, centralized state, cyrb53 hashing, selector fallback chains, async init with settings gate, per-container streaming locks, message protocol constants with validation, service worker pre-init queue, stale settings detection
 - **v4.7** - Positive-scoping thinking filter via `getResponseScope()` (ignores `.font-ui` tool timelines and thinking UI entirely), fixes for web search "10 results" leaking into auto-stream, auto-stream sent-state preserved across Claude DOM rebuilds
 - **v4.6** - Per-tab auto-send persistence across refreshes, deferred screenshot paste for background tabs, voice/screenshot broadcasts no longer switch active tab, color-coded toast notifications, Claude thinking section filter, skip keywords support for Claude
