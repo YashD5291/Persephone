@@ -607,6 +607,22 @@
         outline: none;
         border-color: #1a1a1a;
       }
+
+      /* Narrow viewport: shift floating buttons above input bar (split view) */
+      @media (max-width: 900px) {
+        .persephone-mic-btn {
+          bottom: 90px;
+        }
+        .persephone-gear-btn {
+          bottom: 146px;
+        }
+        .persephone-camera-btn {
+          bottom: 194px;
+        }
+        .persephone-settings-panel {
+          bottom: 242px;
+        }
+      }
     `;
     document.head.appendChild(style);
   }
