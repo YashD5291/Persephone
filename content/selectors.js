@@ -37,8 +37,8 @@
     },
   } : {
     responseContainer: {
-      primary: '.items-start .response-content-markdown',
-      fallbacks: ['.response-content-markdown'],
+      primary: '.response-content-markdown',
+      fallbacks: [],
       critical: true,
     },
     userQuestion: {
@@ -139,6 +139,7 @@
     for (const [name, def] of Object.entries(SELECTOR_DEFS)) {
       const primaryCount = document.querySelectorAll(def.primary).length;
       const activeFallback = sel._active[name] !== def.primary ? sel._active[name] : null;
+      const fallbackCount = activeFallback ? document.querySelectorAll(activeFallback).length : 0;
       // responseContainer is only critical when responses exist on the page
       const effectiveCritical = (name === 'responseContainer') ? (def.critical && hasVisibleResponses) : def.critical;
       checks.push({
@@ -146,7 +147,7 @@
         selector: def.primary,
         count: primaryCount,
         critical: effectiveCritical,
-        ok: primaryCount > 0 || (name === 'responseContainer' && !hasVisibleResponses),
+        ok: primaryCount > 0 || fallbackCount > 0 || (name === 'responseContainer' && !hasVisibleResponses),
         fallbackActive: activeFallback,
       });
     }
