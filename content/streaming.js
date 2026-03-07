@@ -280,14 +280,48 @@
 
     let streamFinalized = false;
     let splitting = false;       // Gate to pause poll during async split
-    let splitDone = false;       // Whether the 69-word split has been performed
-    let msg1Id = activeMessageId;
-    let msg2Id = null;
-    let chunk1Text = null;       // First 69 words (frozen after split)
-    let lastSentMsg2Text = null; // Last text sent/edited to msg2 (for dedup)
+    let messages = [{ id: activeMessageId }]; // Array of sent telegram messages
+    let frozenChunks = [];       // Text of each finalized chunk
+    let lastSentActiveText = lastSentText; // Last text sent/edited to active (last) message
 
     // Anchor: first ~50 chars of initial text, used to verify element identity
     const textAnchor = lastSentText.substring(0, 50);
+
+    /**
+     * Split text into all WORD_SPLIT_THRESHOLD-word chunks.
+     * Returns array where last element is the active (partial) chunk.
+     */
+    const splitAllChunks = (text) => {
+      const chunks = [];
+      let remaining = text;
+      while (true) {
+        const parts = splitAtWordBoundary(remaining, WORD_SPLIT_THRESHOLD);
+        if (parts) {
+          chunks.push(parts[0]);
+          remaining = parts[1];
+        } else {
+          chunks.push(remaining);
+          break;
+        }
+      }
+      return chunks;
+    };
+
+    /**
+     * Get the active (unfrozen) portion of text by skipping past frozen chunks.
+     */
+    const getActiveText = (fullText) => {
+      let remaining = fullText;
+      for (let i = 0; i < frozenChunks.length; i++) {
+        const parts = splitAtWordBoundary(remaining, WORD_SPLIT_THRESHOLD);
+        if (parts) {
+          remaining = parts[1];
+        } else {
+          return '';
+        }
+      }
+      return remaining;
+    };
 
     /**
      * Get the best available text for the first paragraph.
@@ -324,45 +358,48 @@
     };
 
     /**
-     * Perform the 69-word split: finalize msg1, send msg2 with remainder.
+     * Perform splits: finalize chunks that exceed threshold, send new messages.
+     * Handles multiple splits in one call if text grew past several thresholds.
      */
     const performSplit = async (currentText) => {
-      const parts = splitAtWordBoundary(currentText, WORD_SPLIT_THRESHOLD);
-      if (!parts) return;
+      const chunks = splitAllChunks(currentText);
+      // chunks.length - 1 = number of finalized chunks needed
+      // Process any new chunks beyond what we already have finalized
+      const newFinalizedCount = chunks.length - 1;
 
-      chunk1Text = parts[0];
-      const chunk2CurrentText = parts[1];
+      for (let i = frozenChunks.length; i < newFinalizedCount; i++) {
+        const chunkText = chunks[i];
+        const msgId = messages[i].id;
 
-      // Finalize msg1 with first 69 words (markdown edit)
-      log.streaming(`📡 Live stream: splitting at ${WORD_SPLIT_THRESHOLD} words`);
-      const editOk = await editInTelegram(msg1Id, chunk1Text);
-      if (!editOk) {
-        log.streaming.warn('⚠️ Live stream: split edit for msg1 failed');
-        // Continue streaming to msg1 as fallback — don't split
-        return;
+        log.streaming(`📡 Live stream: finalizing chunk ${i + 1} at ${WORD_SPLIT_THRESHOLD} words`);
+        const editOk = await editInTelegram(msgId, chunkText);
+        if (!editOk) {
+          log.streaming.warn(`⚠️ Live stream: chunk ${i + 1} edit failed, stopping split`);
+          return;
+        }
+
+        frozenChunks.push(chunkText);
+        state.sentByHash.set(hashText(chunkText), {
+          messageId: msgId,
+          text: chunkText,
+          isMultiPart: false,
+          status: 'sent'
+        });
+
+        // Send next chunk as new message if we don't have one yet
+        if (i + 1 >= messages.length) {
+          const remainderText = chunks.slice(i + 1).join(' ');
+          const result2 = await sendToTelegram(remainderText);
+          if (!result2.success) {
+            log.streaming.warn(`⚠️ Live stream: chunk ${i + 2} send failed`);
+            return;
+          }
+          const newMsgId = Array.isArray(result2.messageId) ? result2.messageId[0] : result2.messageId;
+          messages.push({ id: newMsgId });
+          lastSentActiveText = remainderText;
+          log.streaming(`📡 Live stream: chunk ${messages.length} started (msgId: ${newMsgId})`);
+        }
       }
-
-      // Store msg1 in sentByHash as delivered
-      state.sentByHash.set(hashText(chunk1Text), {
-        messageId: msg1Id,
-        text: chunk1Text,
-        isMultiPart: false,
-        status: 'sent'
-      });
-
-      // Send remainder as new message
-      const result2 = await sendToTelegram(chunk2CurrentText);
-      if (!result2.success) {
-        log.streaming.warn('⚠️ Live stream: msg2 send failed, continuing with msg1 only');
-        splitDone = true;
-        return;
-      }
-
-      msg2Id = Array.isArray(result2.messageId) ? result2.messageId[0] : result2.messageId;
-      activeMessageId = msg2Id;
-      lastSentMsg2Text = chunk2CurrentText;
-      splitDone = true;
-      log.streaming(`📡 Live stream: split done (msg1: ${msg1Id}, msg2: ${msg2Id})`);
     };
 
     /**
@@ -388,77 +425,56 @@
       const fullText = getFinalText();
       if (!fullText || fullText.length < 5) return;
 
-      // If no split happened yet but text qualifies, do it now at finalize time
-      if (!splitDone && !splitting) {
-        const parts = splitAtWordBoundary(fullText, WORD_SPLIT_THRESHOLD);
-        if (parts) {
-          chunk1Text = parts[0];
-          log.streaming(`📡 Live stream: late split at finalize (${WORD_SPLIT_THRESHOLD} words)`);
-
-          // Finalize msg1 with first 69 words
-          const editOk = await editInTelegram(msg1Id, chunk1Text);
-          if (editOk) {
-            state.sentByHash.set(hashText(chunk1Text), {
-              messageId: msg1Id,
-              text: chunk1Text,
-              isMultiPart: false,
-              status: 'sent'
-            });
-
-            // Send remainder as new message
-            const result2 = await sendToTelegram(parts[1]);
-            if (result2.success) {
-              msg2Id = Array.isArray(result2.messageId) ? result2.messageId[0] : result2.messageId;
-              splitDone = true;
-            }
-          }
+      // If splits are still needed, do them now at finalize time
+      if (!splitting) {
+        const chunks = splitAllChunks(fullText);
+        if (chunks.length - 1 > frozenChunks.length) {
+          log.streaming(`📡 Live stream: late split at finalize`);
+          await performSplit(fullText);
         }
       }
 
-      if (splitDone && msg2Id) {
-        // --- Two-message finalization ---
-        // msg1 (chunk1Text) is already finalized and in sentByHash
+      if (frozenChunks.length > 0) {
+        // --- Multi-message finalization ---
+        // All frozen chunks are already finalized and in sentByHash
 
-        // Get the remainder text (everything after chunk1)
-        const remainderText = fullText.startsWith(chunk1Text)
-          ? fullText.substring(chunk1Text.length).trim()
-          : (() => {
-              const parts = splitAtWordBoundary(fullText, WORD_SPLIT_THRESHOLD);
-              return parts ? parts[1] : fullText;
-            })();
+        // Get the active (last) portion of text
+        const activeText = getActiveText(fullText);
+        const activeMsgId = messages[messages.length - 1].id;
 
-        if (!remainderText || remainderText.length < 3) {
+        if (!activeText || activeText.length < 3) {
           log.streaming('📡 Live stream: finalized (split, no remainder)');
           showToast('✓ Streamed first chunk');
           return;
         }
 
-        // Store remainder in sentByHash BEFORE async edit (for DOM rebuild)
-        const chunk2Hash = hashText(remainderText);
-        const msg2Data = {
-          messageId: msg2Id,
-          text: remainderText,
+        // Store active chunk in sentByHash BEFORE async edit (for DOM rebuild)
+        const activeHash = hashText(activeText);
+        const activeMsgData = {
+          messageId: activeMsgId,
+          text: activeText,
           isMultiPart: false,
           status: 'pending'
         };
-        state.sentByHash.set(chunk2Hash, msg2Data);
+        state.sentByHash.set(activeHash, activeMsgData);
 
-        // Final markdown edit for msg2 (skip if text hasn't changed since last send/edit)
-        if (remainderText !== lastSentMsg2Text) {
-          const editOk = await editInTelegram(msg2Id, remainderText);
+        // Final markdown edit for active message (skip if unchanged)
+        if (activeText !== lastSentActiveText) {
+          const editOk = await editInTelegram(activeMsgId, activeText);
           if (!editOk) {
-            log.streaming.warn('⚠️ Live stream: final edit for msg2 failed');
-            state.sentByHash.delete(chunk2Hash);
+            log.streaming.warn('⚠️ Live stream: final edit for active chunk failed');
+            state.sentByHash.delete(activeHash);
           } else {
-            msg2Data.status = 'sent';
+            activeMsgData.status = 'sent';
           }
         } else {
-          msg2Data.status = 'sent';
+          activeMsgData.status = 'sent';
         }
 
         // Store composite entry under the full text hash for DOM rebuild restoration
+        const allMessageIds = messages.map(m => m.id);
         const compositeData = {
-          messageId: [msg1Id, msg2Id],
+          messageId: allMessageIds,
           text: fullText,
           isMultiPart: true,
           status: 'sent'
@@ -466,14 +482,15 @@
         state.sentByHash.set(hashText(fullText), compositeData);
 
         finalizeUI(compositeData);
-        log.streaming('📡 Live stream: finalized (2 messages)');
-        showToast('✓ Streamed first chunk (split)');
+        log.streaming(`📡 Live stream: finalized (${messages.length} messages)`);
+        showToast(`✓ Streamed first chunk (${messages.length} parts)`);
 
       } else {
-        // --- Single-message finalization (no split, or split failed) ---
+        // --- Single-message finalization (no split needed) ---
+        const msgId = messages[0].id;
         const finalHash = hashText(fullText);
         const msgData = {
-          messageId: msg1Id,
+          messageId: msgId,
           text: fullText,
           isMultiPart: result.isMultiPart,
           status: 'pending'
@@ -481,7 +498,7 @@
         state.sentByHash.set(finalHash, msgData);
 
         if (fullText !== lastSentText) {
-          const editOk = await editInTelegram(msg1Id, fullText);
+          const editOk = await editInTelegram(msgId, fullText);
           if (!editOk) {
             log.streaming.warn('⚠️ Live stream: final edit failed');
             state.sentByHash.delete(finalHash);
@@ -506,33 +523,28 @@
 
       lastSentText = text;
 
-      // Check if we've hit the word threshold and haven't split yet
-      if (!splitDone) {
-        const parts = splitAtWordBoundary(text, WORD_SPLIT_THRESHOLD);
-        if (parts) {
-          splitting = true;
-          try {
-            await performSplit(text);
-          } finally {
-            splitting = false;
-          }
-          return;
+      // Check if active portion exceeds threshold — need to split
+      const activeText = getActiveText(text);
+      const parts = splitAtWordBoundary(activeText, WORD_SPLIT_THRESHOLD);
+      if (parts) {
+        splitting = true;
+        try {
+          await performSplit(text);
+        } finally {
+          splitting = false;
         }
+        return;
       }
 
-      // Regular stream edit
-      if (splitDone && msg2Id) {
-        // Stream only the remainder to msg2
-        const remainderText = text.startsWith(chunk1Text)
-          ? text.substring(chunk1Text.length).trim()
-          : text;
-        if (remainderText && remainderText.length > 0) {
-          lastSentMsg2Text = remainderText;
-          streamEditTelegram(msg2Id, remainderText);
+      // Regular stream edit to active (last) message
+      const activeMsgId = messages[messages.length - 1].id;
+      if (frozenChunks.length > 0) {
+        if (activeText && activeText.length > 0) {
+          lastSentActiveText = activeText;
+          streamEditTelegram(activeMsgId, activeText);
         }
       } else {
-        // Pre-split: stream full text to msg1
-        streamEditTelegram(msg1Id, text);
+        streamEditTelegram(activeMsgId, text);
       }
     }, 500);
 
