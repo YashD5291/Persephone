@@ -3,10 +3,10 @@
   const P = window.Persephone;
 
   const {
-    state, log, sel, SITE, getContainerId, isElementStreaming, getLatestUserQuestion, 
-    shouldSkipAutoSend, processContainer, extractText, hashText, getResponseScope, MSG, 
-    isContextValid, sendToTelegram, editInTelegram, streamEditTelegram, showToast, 
-    createActionButtonGroup, triggerPreconnect
+    state, log, sel, SITE, getContainerId, isElementStreaming, getLatestUserQuestion,
+    shouldSkipAutoSend, processContainer, extractText, hashText, getResponseScope, MSG,
+    isContextValid, sendToTelegram, editInTelegram, streamEditTelegram, showToast,
+    createActionButtonGroup, triggerPreconnect, splitAtWordBoundary
   } = P;
 
   /**
@@ -154,29 +154,6 @@
   // ============================================
   // LIVE STREAM FIRST CHUNK
   // ============================================
-
-  /**
-   * Split text at a word boundary after the Nth word.
-   * Returns [first N words, remainder] or null if text has <= N words.
-   */
-  function splitAtWordBoundary(text, wordCount) {
-    let count = 0;
-    let i = 0;
-    const len = text.length;
-    // Skip leading whitespace
-    while (i < len && /\s/.test(text[i])) i++;
-    while (i < len && count < wordCount) {
-      // Skip current word
-      while (i < len && !/\s/.test(text[i])) i++;
-      count++;
-      if (count < wordCount) {
-        // Skip whitespace between words
-        while (i < len && /\s/.test(text[i])) i++;
-      }
-    }
-    if (count < wordCount || i >= len) return null; // Not enough words to split
-    return [text.substring(0, i).trim(), text.substring(i).trim()];
-  }
 
   /**
    * Wait for the first content element in a container to have enough text.

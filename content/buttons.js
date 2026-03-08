@@ -3,9 +3,9 @@
   const P = window.Persephone;
 
   const {
-    state, log, hashText, extractText, splitText, isElementStreaming, getResponseScope, sel, 
-    getContainerId, isContextValid, MSG, sendToTelegram, editInTelegram, deleteFromTelegram, 
-    showToast
+    state, log, hashText, extractText, splitText, splitIntoWordChunks, isElementStreaming,
+    getResponseScope, sel, getContainerId, isContextValid, MSG, sendToTelegram, editInTelegram,
+    deleteFromTelegram, showToast
   } = P;
 
   // ============================================
@@ -233,39 +233,26 @@
       return true;
     }
 
-    // Long paragraph: split into two sub-chunks (only for non-streamed paragraphs)
+    // Long paragraph: split into N sub-chunks by word limit
     if (text.length > state.splitThreshold) {
-      const [chunk1, chunk2] = splitText(text);
-      const hash1 = hashText(chunk1);
-      const hash2 = hashText(chunk2);
+      const chunks = splitIntoWordChunks(text, state.firstChunkWordLimit);
 
-      // Check if chunks were already sent (restore path)
-      const sent1 = state.sentByHash.has(hash1);
-      const sent2 = state.sentByHash.has(hash2);
-
-      if (sent1) {
-        const indicator = document.createElement('span');
-        indicator.className = 'persephone-sent-indicator';
-        indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-        indicator.title = 'Part 1 sent';
-        element.appendChild(indicator);
-      } else {
-        element.appendChild(createSplitSendButton(element, chunk1, 1));
-      }
-
-      if (sent2) {
-        const indicator = document.createElement('span');
-        indicator.className = 'persephone-sent-indicator';
-        indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-        indicator.title = 'Part 2 sent';
-        element.appendChild(indicator);
-      } else {
-        element.appendChild(createSplitSendButton(element, chunk2, 2));
-      }
+      chunks.forEach((chunk, i) => {
+        const chunkHash = hashText(chunk);
+        if (state.sentByHash.has(chunkHash)) {
+          const indicator = document.createElement('span');
+          indicator.className = 'persephone-sent-indicator';
+          indicator.innerHTML = `<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+          indicator.title = `Part ${i + 1} sent`;
+          element.appendChild(indicator);
+        } else {
+          element.appendChild(createSplitSendButton(element, chunk, i + 1));
+        }
+      });
 
       if (!state.seenTexts.has(hash)) {
         state.seenTexts.add(hash);
-        log.ui.debug(`✅ <${element.tagName.toLowerCase()}> (split): ${text.substring(0, 50)}...`);
+        log.ui.debug(`✅ <${element.tagName.toLowerCase()}> (${chunks.length} parts): ${text.substring(0, 50)}...`);
       }
 
       return true;

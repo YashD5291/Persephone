@@ -223,10 +223,53 @@
     return [text.substring(0, mid).trim(), text.substring(mid).trim()];
   }
 
+  /**
+   * Split text at a word boundary after the Nth word.
+   * Returns [first N words, remainder] or null if text has <= N words.
+   */
+  function splitAtWordBoundary(text, wordCount) {
+    let count = 0;
+    let i = 0;
+    const len = text.length;
+    // Skip leading whitespace
+    while (i < len && /\s/.test(text[i])) i++;
+    while (i < len && count < wordCount) {
+      // Skip current word
+      while (i < len && !/\s/.test(text[i])) i++;
+      count++;
+      if (count < wordCount) {
+        // Skip whitespace between words
+        while (i < len && /\s/.test(text[i])) i++;
+      }
+    }
+    if (count < wordCount || i >= len) return null; // Not enough words to split
+    return [text.substring(0, i).trim(), text.substring(i).trim()];
+  }
+
+  /**
+   * Split text into N chunks of wordCount words each.
+   * Returns array where last element may have fewer words.
+   */
+  function splitIntoWordChunks(text, wordCount) {
+    const chunks = [];
+    let remaining = text;
+    while (true) {
+      const parts = splitAtWordBoundary(remaining, wordCount);
+      if (parts) {
+        chunks.push(parts[0]);
+        remaining = parts[1];
+      } else {
+        chunks.push(remaining);
+        break;
+      }
+    }
+    return chunks;
+  }
+
   // --- Exports ---
   Object.assign(P, {
-    getResponseScope, isContextValid, isElementStreaming, normalizeForHash, hashText, 
-    getLatestUserQuestion, shouldSkipAutoSend, extractText, formatListItem, cleanText, formatList, 
-    formatCode, formatTable, splitText
+    getResponseScope, isContextValid, isElementStreaming, normalizeForHash, hashText,
+    getLatestUserQuestion, shouldSkipAutoSend, extractText, formatListItem, cleanText, formatList,
+    formatCode, formatTable, splitText, splitAtWordBoundary, splitIntoWordChunks
   });
 })();

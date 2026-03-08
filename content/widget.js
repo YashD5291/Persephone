@@ -261,7 +261,7 @@
     thresholdRow.className = 'persephone-panel-row';
     const thresholdLabel = document.createElement('span');
     thresholdLabel.className = 'persephone-panel-label';
-    thresholdLabel.textContent = 'Split threshold';
+    thresholdLabel.textContent = 'Other chunks: split after (chars)';
     const thresholdInput = document.createElement('input');
     thresholdInput.type = 'number';
     thresholdInput.className = 'persephone-panel-input';
@@ -292,7 +292,7 @@
     wordLimitRow.className = 'persephone-panel-row';
     const wordLimitLabel = document.createElement('span');
     wordLimitLabel.className = 'persephone-panel-label';
-    wordLimitLabel.textContent = '1st chunk words';
+    wordLimitLabel.textContent = 'First chunk: split every (words)';
     const wordLimitInput = document.createElement('input');
     wordLimitInput.type = 'number';
     wordLimitInput.className = 'persephone-panel-input';
