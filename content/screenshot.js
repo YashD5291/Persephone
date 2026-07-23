@@ -29,6 +29,23 @@
   }
 
   /**
+   * Re-encode any image blob to PNG (Chrome's clipboard only accepts image/png).
+   */
+  async function toPngBlob(blob) {
+    if (blob.type === 'image/png') return blob;
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  }
+
+  /**
    * Convert a data URL string back to a Blob.
    */
   function dataUrlToBlob(dataUrl) {
@@ -42,41 +59,209 @@
     return new Blob([array], { type: mime });
   }
 
+  // ============================================
+  // PURE HELPERS (unit-testable, no DOM/stream deps)
+  // ============================================
+
+  /** Clamp a JPEG quality value into the valid 0.1–1.0 range. */
+  function clampQuality(q) {
+    const n = Number(q);
+    if (!Number.isFinite(n)) return 0.85;
+    return Math.min(1, Math.max(0.1, n));
+  }
+
   /**
-   * Capture a frame from the active screenshot stream and return as a Blob.
-   * Uses ImageCapture API for native-resolution grab, falls back to canvas.
+   * Map a normalized crop region {x,y,w,h} (fractions 0–1) onto a source of the
+   * given pixel dimensions. Returns an integer source rect clamped to bounds.
+   * A null region means "whole frame".
    */
-  async function captureFrame() {
+  function computeCropRect(region, width, height) {
+    if (!region) return { sx: 0, sy: 0, sw: width, sh: height };
+    let sx = Math.round(region.x * width);
+    let sy = Math.round(region.y * height);
+    let sw = Math.round(region.w * width);
+    let sh = Math.round(region.h * height);
+    sx = Math.max(0, Math.min(sx, width - 1));
+    sy = Math.max(0, Math.min(sy, height - 1));
+    sw = Math.max(1, Math.min(sw, width - sx));
+    sh = Math.max(1, Math.min(sh, height - sy));
+    return { sx, sy, sw, sh };
+  }
+
+  /**
+   * Convert a drag rectangle (preview-pixel coords) into a normalized region.
+   * Returns null when the drag is too small to be a deliberate selection.
+   */
+  function normalizedRectFromDrag(dragRect, previewW, previewH) {
+    if (!previewW || !previewH) return null;
+    const x = Math.min(dragRect.x0, dragRect.x1);
+    const y = Math.min(dragRect.y0, dragRect.y1);
+    const w = Math.abs(dragRect.x1 - dragRect.x0);
+    const h = Math.abs(dragRect.y1 - dragRect.y0);
+    if (w < 8 || h < 8) return null;
+    return { x: x / previewW, y: y / previewH, w: w / previewW, h: h / previewH };
+  }
+
+  // ============================================
+  // FRAME GRAB + ENCODE
+  // ============================================
+
+  /**
+   * Grab a single raw frame from the active stream.
+   * Returns { source, width, height, isBitmap } or null.
+   * Prefers ImageCapture (native resolution), falls back to the video element.
+   */
+  async function grabFrameSource() {
     if (!state.screenshotStream) return null;
 
     const track = state.screenshotStream.getVideoTracks()[0];
     if (!track) return null;
 
-    // Try ImageCapture.grabFrame() — gets raw frame at native resolution
     try {
       const imageCapture = new ImageCapture(track);
       const bitmap = await imageCapture.grabFrame();
-      log.screenshot(`📸 Capture resolution: ${bitmap.width}×${bitmap.height}`);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(bitmap, 0, 0);
-      bitmap.close();
-      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      return { source: bitmap, width: bitmap.width, height: bitmap.height, isBitmap: true };
     } catch (e) {
       log.screenshot.warn('📸 ImageCapture failed, using video fallback:', e.message);
     }
 
-    // Fallback: draw from video element
     if (!state.screenshotVideo) return null;
+    return {
+      source: state.screenshotVideo,
+      width: state.screenshotVideo.videoWidth,
+      height: state.screenshotVideo.videoHeight,
+      isBitmap: false,
+    };
+  }
+
+  /**
+   * Crop the frame to `region` and encode as JPEG at `quality`.
+   */
+  function encodeFrameToBlob(frame, region, quality) {
+    const { sx, sy, sw, sh } = computeCropRect(region, frame.width, frame.height);
     const canvas = document.createElement('canvas');
-    canvas.width = state.screenshotVideo.videoWidth;
-    canvas.height = state.screenshotVideo.videoHeight;
-    log.screenshot(`📸 Capture resolution (fallback): ${canvas.width}×${canvas.height}`);
+    canvas.width = sw;
+    canvas.height = sh;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(state.screenshotVideo, 0, 0);
-    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    // JPEG has no alpha channel — paint white first so any transparent pixels
+    // don't render as black.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sw, sh);
+    ctx.drawImage(frame.source, sx, sy, sw, sh, 0, 0, sw, sh);
+    return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  }
+
+  /**
+   * Capture a frame from the active stream, cropped to the saved region and
+   * encoded as JPEG at the current quality setting. Returns a Blob.
+   */
+  async function captureFrame() {
+    const frame = await grabFrameSource();
+    if (!frame) return null;
+
+    const region = state.screenshotCropRegion;
+    const quality = clampQuality(state.screenshotJpegQuality);
+    log.screenshot(`📸 Capture ${frame.width}×${frame.height}${region ? ' (cropped)' : ''} @ q${quality}`);
+
+    const blob = await encodeFrameToBlob(frame, region, quality);
+    if (frame.isBitmap && frame.source.close) frame.source.close();
+    return blob;
+  }
+
+  /**
+   * Show a full-page overlay with a snapshot of the shared window and let the
+   * user drag a rectangle to define the crop region.
+   * Resolves with:
+   *   - {x,y,w,h} normalized region  → set as the new region
+   *   - null                         → explicit full-frame (Enter)
+   *   - undefined                    → cancelled / no change (Esc or tiny drag)
+   */
+  async function defineCropRegion() {
+    const frame = await grabFrameSource();
+    if (!frame) {
+      showToast('Could not read the shared window');
+      return undefined;
+    }
+
+    // Render the grabbed frame to a preview image (compressed — preview only).
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = frame.width;
+    previewCanvas.height = frame.height;
+    previewCanvas.getContext('2d').drawImage(frame.source, 0, 0);
+    if (frame.isBitmap && frame.source.close) frame.source.close();
+    const previewUrl = previewCanvas.toDataURL('image/jpeg', 0.7);
+
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'persephone-crop-overlay';
+      overlay.innerHTML = `
+        <div class="persephone-crop-hint">Drag to select the region to capture · Enter = full window · Esc = cancel</div>
+        <div class="persephone-crop-stage">
+          <img class="persephone-crop-img" draggable="false">
+          <div class="persephone-crop-sel" hidden></div>
+        </div>`;
+      overlay.querySelector('.persephone-crop-img').src = previewUrl;
+      document.body.appendChild(overlay);
+
+      const img = overlay.querySelector('.persephone-crop-img');
+      const selBox = overlay.querySelector('.persephone-crop-sel');
+      let dragging = false;
+      let start = null;
+
+      const imgRect = () => img.getBoundingClientRect();
+
+      function updateBox(x, y, w, h) {
+        selBox.style.left = x + 'px';
+        selBox.style.top = y + 'px';
+        selBox.style.width = w + 'px';
+        selBox.style.height = h + 'px';
+      }
+
+      function cleanup(region) {
+        document.removeEventListener('keydown', onKey, true);
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        overlay.remove();
+        resolve(region);
+      }
+
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); cleanup(undefined); }
+        if (e.key === 'Enter') { e.preventDefault(); cleanup(null); }
+      }
+
+      function onMove(e) {
+        if (!dragging) return;
+        const r = imgRect();
+        const cx = Math.max(0, Math.min(e.clientX - r.left, r.width));
+        const cy = Math.max(0, Math.min(e.clientY - r.top, r.height));
+        updateBox(Math.min(start.x, cx), Math.min(start.y, cy), Math.abs(cx - start.x), Math.abs(cy - start.y));
+      }
+
+      function onUp(e) {
+        if (!dragging) return;
+        dragging = false;
+        const r = imgRect();
+        const cx = Math.max(0, Math.min(e.clientX - r.left, r.width));
+        const cy = Math.max(0, Math.min(e.clientY - r.top, r.height));
+        const region = normalizedRectFromDrag({ x0: start.x, y0: start.y, x1: cx, y1: cy }, r.width, r.height);
+        // Too-small drag (region === null) is treated as a misclick → no change.
+        cleanup(region === null ? undefined : region);
+      }
+
+      img.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const r = imgRect();
+        dragging = true;
+        start = { x: e.clientX - r.left, y: e.clientY - r.top };
+        selBox.hidden = false;
+        updateBox(start.x, start.y, 0, 0);
+        window.addEventListener('mousemove', onMove, true);
+        window.addEventListener('mouseup', onUp, true);
+      });
+
+      document.addEventListener('keydown', onKey, true);
+    });
   }
 
   /**
@@ -93,8 +278,10 @@
     // 1. Write to clipboard only from the initiating tab.
     if (writeClipboard) {
       try {
-        const clipItem = new ClipboardItem({ 'image/png': blob });
-        await navigator.clipboard.write([clipItem]);
+        // Chrome's async clipboard only accepts image/png, so write a PNG copy
+        // for the Cmd+V fallback even when the capture itself is JPEG.
+        const pngBlob = await toPngBlob(blob);
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
       } catch (e) {
         log.screenshot.warn('📸 Clipboard write failed:', e.message);
       }
@@ -149,6 +336,8 @@
       state.screenshotVideo.remove();
       state.screenshotVideo = null;
     }
+    // Region is tied to the shared window — clear it when the stream ends.
+    state.screenshotCropRegion = null;
     const btn = document.querySelector('.persephone-camera-btn');
     if (btn) btn.classList.remove('stream-active');
     log.screenshot('📸 Stream stopped');
@@ -156,8 +345,9 @@
 
   /**
    * Handle camera button click.
-   * First click: prompt user to select a window (getDisplayMedia).
-   * Subsequent clicks: capture frame instantly from the existing stream.
+   * First click: pick a window (getDisplayMedia), then draw the crop region.
+   * Subsequent clicks: capture instantly (cropped to the saved region).
+   * Shift+click: re-open the region picker.
    * Alt+click: stop the active stream.
    */
   async function handleScreenshotClick(e) {
@@ -207,7 +397,20 @@
       if (btn) btn.classList.add('stream-active');
       const trackSettings = state.screenshotStream.getVideoTracks()[0].getSettings();
       log.screenshot(`📸 Stream started — ${trackSettings.width}×${trackSettings.height} @ ${trackSettings.frameRate}fps`);
-      showToast('Window selected — click again to capture');
+
+      // Let the user pick the region to capture from this window.
+      showToast('Window selected — drag to pick a region');
+      const region = await defineCropRegion();
+      if (region !== undefined) state.screenshotCropRegion = region;
+      showToast(state.screenshotCropRegion ? 'Region set — click to capture' : 'Full window — click to capture');
+      return;
+    }
+
+    // Shift+click re-opens the region picker without capturing.
+    if (e.shiftKey) {
+      const region = await defineCropRegion();
+      if (region !== undefined) state.screenshotCropRegion = region;
+      showToast(state.screenshotCropRegion ? 'Region updated' : 'Full window — region cleared');
       return;
     }
 
@@ -251,7 +454,7 @@
 
     const btn = document.createElement('button');
     btn.className = 'persephone-camera-btn';
-    btn.title = 'Screenshot capture (Alt+click to stop)';
+    btn.title = 'Screenshot capture · Shift+click to re-pick region · Alt+click to stop';
     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4z"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>`;
 
     // Prevent mousedown from stealing focus away from chat input
@@ -266,7 +469,8 @@
 
   // --- Exports ---
   Object.assign(P, {
-    blobToDataUrl, dataUrlToBlob, captureFrame, pasteScreenshotIntoChat, stopScreenshotStream, 
-    handleScreenshotClick, injectScreenshotButton
+    blobToDataUrl, dataUrlToBlob, captureFrame, pasteScreenshotIntoChat, stopScreenshotStream,
+    handleScreenshotClick, injectScreenshotButton, defineCropRegion,
+    clampQuality, computeCropRect, normalizedRectFromDrag
   });
 })();

@@ -49,6 +49,8 @@
     // Media
     screenshotStream: null,
     screenshotVideo: null,
+    screenshotJpegQuality: 0.85,     // 0.1–1.0, applied at capture time
+    screenshotCropRegion: null,      // {x,y,w,h} normalized 0–1, or null for full frame
     pendingScreenshots: [],
     micRecording: false,
 

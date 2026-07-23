@@ -220,6 +220,50 @@
         100% { transform: scale(1); }
       }
 
+      /* Screenshot region picker */
+      .persephone-crop-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483646;
+        background: rgba(0, 0, 0, 0.78);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .persephone-crop-hint {
+        color: #fff;
+        font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 8px 14px;
+        border-radius: 8px;
+        text-align: center;
+      }
+      .persephone-crop-stage {
+        position: relative;
+        line-height: 0;
+        max-width: 92vw;
+        max-height: 82vh;
+      }
+      .persephone-crop-img {
+        max-width: 92vw;
+        max-height: 82vh;
+        display: block;
+        cursor: crosshair;
+        user-select: none;
+        border-radius: 6px;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+      }
+      .persephone-crop-sel {
+        position: absolute;
+        border: 2px solid #22c55e;
+        background: rgba(34, 197, 94, 0.18);
+        pointer-events: none;
+      }
+
       /* Toast */
       .persephone-toast {
         position: fixed;

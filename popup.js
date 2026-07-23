@@ -18,11 +18,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const autoSubmitVoiceToggle = document.getElementById('autoSubmitVoiceToggle');
   const voiceAutoRestartToggle = document.getElementById('voiceAutoRestartToggle');
   const voiceRestartDelayInput = document.getElementById('voiceRestartDelay');
+  const screenshotQualityInput = document.getElementById('screenshotQuality');
+  const screenshotQualityValue = document.getElementById('screenshotQualityValue');
 
   const DEFAULT_SKIP_KEYWORDS = ['short', 'shorter', 'shrt', 'shrtr', 'shrter'];
   const DEFAULT_SPLIT_THRESHOLD = 250;
   const DEFAULT_FIRST_CHUNK_WORD_LIMIT = 42;
   const DEFAULT_VOICE_RESTART_DELAY = 3;
+  const DEFAULT_SCREENSHOT_QUALITY = 0.85;
   const TAB_URLS = ['https://grok.com/*', 'https://x.com/i/grok*', 'https://claude.ai/*'];
 
   // Load saved settings
@@ -36,7 +39,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'firstChunkWordLimit',
     'autoSubmitVoice',
     'voiceAutoRestart',
-    'voiceRestartDelay'
+    'voiceRestartDelay',
+    'screenshotJpegQuality'
   ]);
 
   if (settings.botToken) botTokenInput.value = settings.botToken;
@@ -47,6 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   autoSubmitVoiceToggle.checked = settings.autoSubmitVoice === true; // Default false
   voiceAutoRestartToggle.checked = settings.voiceAutoRestart === true; // Default false
   voiceRestartDelayInput.value = settings.voiceRestartDelay || DEFAULT_VOICE_RESTART_DELAY;
+  setScreenshotQualityUI(settings.screenshotJpegQuality || DEFAULT_SCREENSHOT_QUALITY);
   messageCount.textContent = settings.messageCount || 0;
 
   // Load skip keywords
@@ -270,6 +275,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Screenshot quality: live label + debounced save
+  function setScreenshotQualityUI(quality) {
+    const q = Math.min(1, Math.max(0.1, Number(quality) || DEFAULT_SCREENSHOT_QUALITY));
+    screenshotQualityInput.value = q;
+    screenshotQualityValue.textContent = `${Math.round(q * 100)}%`;
+  }
+
+  let qualitySaveTimeout = null;
+  screenshotQualityInput.addEventListener('input', () => {
+    screenshotQualityValue.textContent = `${Math.round(parseFloat(screenshotQualityInput.value) * 100)}%`;
+    clearTimeout(qualitySaveTimeout);
+    qualitySaveTimeout = setTimeout(saveScreenshotQuality, 400);
+  });
+
+  async function saveScreenshotQuality() {
+    clearTimeout(qualitySaveTimeout);
+    const val = parseFloat(screenshotQualityInput.value);
+    const screenshotJpegQuality = (val >= 0.1 && val <= 1) ? val : DEFAULT_SCREENSHOT_QUALITY;
+    await chrome.storage.sync.set({ screenshotJpegQuality });
+
+    chrome.tabs.query({ url: TAB_URLS }, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { type: 'SCREENSHOT_QUALITY_CHANGED', screenshotJpegQuality });
+      });
+    });
+  }
+
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.messageCount) {
@@ -297,6 +329,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (changes.voiceRestartDelay !== undefined) {
       voiceRestartDelayInput.value = changes.voiceRestartDelay.newValue || DEFAULT_VOICE_RESTART_DELAY;
+    }
+    if (changes.screenshotJpegQuality !== undefined) {
+      setScreenshotQualityUI(changes.screenshotJpegQuality.newValue || DEFAULT_SCREENSHOT_QUALITY);
     }
   });
 });

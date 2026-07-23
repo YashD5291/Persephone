@@ -201,6 +201,10 @@
         log.voice.debug(`🎙️ Voice restart delay: ${state.voiceRestartDelay}s`);
         updateWidgetStates();
       }
+      if (request.type === MSG.SCREENSHOT_QUALITY_CHANGED) {
+        state.screenshotJpegQuality = request.screenshotJpegQuality || 0.85;
+        log.screenshot(`📸 JPEG quality updated: ${state.screenshotJpegQuality}`);
+      }
       if (request.type === MSG.INSERT_AND_SUBMIT) {
         insertTextAndSubmit(request.text, { focusInput: false });
       }
@@ -258,6 +262,9 @@
       }
       if (changes.firstChunkWordLimit) {
         state.firstChunkWordLimit = changes.firstChunkWordLimit.newValue || 42;
+      }
+      if (changes.screenshotJpegQuality) {
+        state.screenshotJpegQuality = changes.screenshotJpegQuality.newValue || 0.85;
       }
       updateWidgetStates();
     });
