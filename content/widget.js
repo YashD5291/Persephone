@@ -15,7 +15,7 @@
 
     try {
       const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice', 'voiceAutoRestart', 'voiceRestartDelay']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice', 'voiceAutoRestart', 'voiceRestartDelay', 'screenshotJpegQuality']);
       state.extensionEnabled = settings.extensionEnabled !== false; // Default true
       state.autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
       state.autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
@@ -24,6 +24,7 @@
       state.autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
       state.voiceAutoRestart = settings.voiceAutoRestart === true; // Default false
       state.voiceRestartDelay = settings.voiceRestartDelay || 3;
+      state.screenshotJpegQuality = settings.screenshotJpegQuality || 0.85;
 
       // Check for per-tab override (persisted in background)
       try {

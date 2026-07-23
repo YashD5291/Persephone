@@ -107,8 +107,16 @@
     return root.querySelectorAll(selectors.join(',')).length;
   }
 
+  /** Derive a filename + type for a screenshot blob from its actual mime. */
+  function fileMetaForBlob(blob) {
+    const type = blob.type || 'image/png';
+    const ext = type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png';
+    return { name: `screenshot.${ext}`, type };
+  }
+
   function dispatchImagePaste(input, blob) {
-    const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+    const meta = fileMetaForBlob(blob);
+    const file = new File([blob], meta.name, { type: meta.type });
     const dt = new DataTransfer();
     dt.items.add(file);
     try {
@@ -130,7 +138,8 @@
   }
 
   function dispatchImageDrop(input, blob) {
-    const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+    const meta = fileMetaForBlob(blob);
+    const file = new File([blob], meta.name, { type: meta.type });
     const dt = new DataTransfer();
     dt.items.add(file);
     const targets = [input, input.closest('form'), document.body].filter(Boolean);

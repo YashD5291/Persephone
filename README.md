@@ -57,12 +57,14 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 ### Screenshot Capture
 - **Floating camera button** on Grok/Claude pages — click to capture a screenshot from another window (e.g., Zoom, slides)
 - First click opens Chrome's window/screen picker via `getDisplayMedia()` — select the window you want to capture
+- **Region crop** — right after you pick the window, a snapshot appears and you drag a rectangle to capture only that portion. Every later capture reuses that region until you change it. Press **Enter** in the picker to capture the full window, **Esc** to cancel
+- **Shift+click** the camera button to re-open the picker and draw a new region (or full-window)
 - **Stream stays open** — subsequent clicks capture instantly without re-picking
-- Screenshot is copied to clipboard and pasted into the chat input automatically (synthetic paste into ProseMirror)
-- If synthetic paste doesn't work, image is on clipboard — just `Cmd+V`
+- **Adjustable quality** — screenshots are saved as JPEG; set the quality (10–100%) with the slider in the popup settings. Lower = smaller files, less detail. Changes apply on the fly to the next capture
+- Screenshot is pasted into the chat input automatically (synthetic paste into ProseMirror); a PNG copy is placed on the clipboard as a `Cmd+V` fallback where the browser allows it
 - Green dot on camera button indicates an active stream
 - **Broadcast to all tabs** — screenshot is queued for all other open Grok/Claude tabs and pasted automatically when you switch to each tab (paste only, no submit, stays on your current tab)
-- **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome)
+- **Alt+click** the camera button to stop the stream manually (also stops when you click "Stop sharing" in Chrome). Stopping the stream clears the saved region
 - Button sits above the gear icon in the bottom-right floating stack
 
 ### Floating Settings Widget
@@ -338,6 +340,7 @@ Content is converted to Telegram Markdown:
 | Skip keywords | `short, shorter, shrt, shrtr, shrter` | Suppress auto-send when question contains these |
 | First chunk split (words) | 42 | Word count at which the auto-streamed first chunk splits into two messages |
 | Split threshold | 250 | Character count above which paragraphs get two sub-chunk buttons |
+| Screenshot quality (JPEG) | 85% | Compression quality for captured screenshots (10–100%); lower = smaller files |
 
 ## Widget Settings (on-page)
 
@@ -396,6 +399,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v5.3** - Screenshot region crop (drag once after picking a window, reused every capture; Shift+click to re-pick, Enter for full window) and adjustable JPEG quality slider in the popup
 - **v5.2** - Voice auto-restart mic (re-activate after voice submit with configurable delay), mic button race condition fix (re-entrancy guard prevents rapid-click state desync)
 - **v5.1** - First chunk word limit (configurable split point for auto-streamed first chunk), tab connectivity indicators (green/grey dots for reachable/stale tabs), selector health check improvements
 - **v5.0** - Production hardening: modular file split (content.js → 13 modules, background.js → 7 modules), structured logging, centralized state, cyrb53 hashing, selector fallback chains, async init with settings gate, per-container streaming locks, message protocol constants with validation, service worker pre-init queue, stale settings detection
