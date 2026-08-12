@@ -4,7 +4,7 @@
 
   const {
     state, log, hashText, extractText, splitText, splitIntoWordChunks, isElementStreaming,
-    getResponseScope, sel, getContainerId, isContextValid, MSG, sendToTelegram, editInTelegram,
+    getResponseScope, isScreenReaderOnly, sel, getContainerId, isContextValid, MSG, sendToTelegram, editInTelegram,
     deleteFromTelegram, showToast
   } = P;
 
@@ -285,6 +285,7 @@
     let count = 0;
 
     elements.forEach(el => {
+      if (isScreenReaderOnly(el)) return;
       if (addButtonToElement(el)) count++;
     });
 

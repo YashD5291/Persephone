@@ -21,7 +21,7 @@
       critical: false,
     },
     cleanTextRemove: {
-      primary: 'button, svg, img, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
+      primary: 'button, svg, img, .sr-only, .persephone-inline-btn, .persephone-btn-group, .persephone-sent-indicator',
       fallbacks: [],
       critical: false,
     },

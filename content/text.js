@@ -4,33 +4,80 @@
 
   const { SITE, sel, state, log } = P;
 
+  const CONTENT_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, pre, blockquote';
+  const CONTENT_SELECTOR_WITH_LI = CONTENT_SELECTOR + ', li';
+
+  function isScreenReaderOnly(element) {
+    return !!(element && element.classList && element.classList.contains('sr-only'));
+  }
+
+  function findContentElements(scope, { includeListItems = false } = {}) {
+    if (!scope) return [];
+    const selector = includeListItems ? CONTENT_SELECTOR_WITH_LI : CONTENT_SELECTOR;
+    return Array.from(scope.querySelectorAll(selector)).filter(el => !isScreenReaderOnly(el));
+  }
+
+  /**
+   * First real content node in a response container.
+   * Skips Claude's sr-only "Claude responded:" announcement heading.
+   */
+  function findFirstContentElement(container) {
+    const scope = getResponseScope(container);
+    if (!scope) return null;
+    return findContentElements(scope)[0] || null;
+  }
+
   /**
    * Get the response content scope within a streaming container.
-   * Claude thinking models use a grid inside div[data-is-streaming]:
+   * Current Claude DOM:
+   *   div[data-is-streaming]
+   *     h2.sr-only          ← screen-reader announcement, not content
+   *     .font-claude-response
+   *       .standard-markdown / .progressive-markdown
+   * Older thinking models also use a grid inside the container:
    *   .row-start-1 = collapsed thinking summary button
    *   .row-start-2 = response area, which has two .row-start-1 children:
    *     - z-[2]: actual response content (empty during thinking, fills when response starts)
    *     - z-[3]: .font-ui tool timeline (web search results, thinking steps)
-   * We need to return ONLY the response content child, not the .font-ui timeline.
    * Returns null if thinking is active but response content area isn't ready.
    */
   function getResponseScope(container) {
     if (SITE !== 'claude') return container;
-    const responseRow = container.querySelector('.row-start-2');
+
+    // Prefer the visible markdown body so the sibling sr-only heading is excluded
+    const fontResponse = container.querySelector('.font-claude-response');
+    const searchRoot = fontResponse || container;
+    const markdown = searchRoot.querySelector('.standard-markdown, .progressive-markdown');
+    if (markdown) return markdown;
+
+    if (fontResponse) {
+      const nestedRow = scopeThinkingRow(fontResponse);
+      if (nestedRow !== undefined) return nestedRow;
+      return fontResponse;
+    }
+
+    const thinkingRow = scopeThinkingRow(container);
+    if (thinkingRow !== undefined) return thinkingRow;
+
+    return container;
+  }
+
+  /**
+   * Resolve a thinking-model grid, or undefined if that structure is absent.
+   * null means the grid exists but only the tool timeline is present.
+   */
+  function scopeThinkingRow(root) {
+    const responseRow = root.querySelector('.row-start-2');
     if (responseRow) {
-      // Find the child .row-start-1 that does NOT contain .font-ui (tool timeline)
       for (const child of responseRow.children) {
         if (child.classList.contains('row-start-1') && !child.querySelector('.font-ui')) {
           return child;
         }
       }
-      // Only .font-ui children — response content not ready yet
       return null;
     }
-    // No grid yet — if .row-start-1 exists, thinking has started
-    if (container.querySelector('.row-start-1')) return null;
-    // No grid structure at all — non-thinking model, use container directly
-    return container;
+    if (root.querySelector('.row-start-1')) return null;
+    return undefined;
   }
 
   function isContextValid() {
@@ -47,12 +94,13 @@
       if (element.hasAttribute('data-is-streaming')) {
         return element.getAttribute('data-is-streaming') === 'true';
       }
+      if (isScreenReaderOnly(element)) return false;
       // Element-level: only the last content element in a streaming response is "still streaming"
       const streamingAncestor = element.closest('[data-is-streaming="true"]');
       if (!streamingAncestor) return false;
       const scope = getResponseScope(streamingAncestor);
       if (!scope) return false; // Thinking in progress, no response content yet
-      const allContent = Array.from(scope.querySelectorAll('p, h1, h2, h3, h4, h5, h6, pre, blockquote, li'));
+      const allContent = findContentElements(scope, { includeListItems: true });
       return allContent.length > 0 && allContent[allContent.length - 1] === element;
     }
     return element.querySelector('.animate-gaussian') !== null;
@@ -268,7 +316,8 @@
 
   // --- Exports ---
   Object.assign(P, {
-    getResponseScope, isContextValid, isElementStreaming, normalizeForHash, hashText,
+    getResponseScope, findFirstContentElement, findContentElements, isScreenReaderOnly,
+    isContextValid, isElementStreaming, normalizeForHash, hashText,
     getLatestUserQuestion, shouldSkipAutoSend, extractText, formatListItem, cleanText, formatList,
     formatCode, formatTable, splitText, splitAtWordBoundary, splitIntoWordChunks
   });
