@@ -4,7 +4,8 @@
 
   const {
     state, log, sel, SITE, getContainerId, isElementStreaming, getLatestUserQuestion,
-    shouldSkipAutoSend, processContainer, extractText, hashText, getResponseScope, MSG,
+    shouldSkipAutoSend, processContainer, extractText, hashText,
+    findFirstContentElement, MSG,
     isContextValid, sendToTelegram, editInTelegram, streamEditTelegram, showToast,
     createActionButtonGroup, triggerPreconnect, splitAtWordBoundary
   } = P;
@@ -162,18 +163,7 @@
   function waitForFirstElement(container, minChars) {
     return new Promise((resolve) => {
       let resolved = false;
-      const contentSelector = 'p, h1, h2, h3, h4, h5, h6, pre, blockquote';
-
-      // Find the first content element in the response scope (skips thinking)
-      const findContent = () => {
-        const scope = getResponseScope(container);
-        if (!scope) return null; // Thinking in progress, response not started
-        const candidates = scope.querySelectorAll(contentSelector);
-        for (const el of candidates) {
-          return el;
-        }
-        return null;
-      };
+      const findContent = () => findFirstContentElement(container);
 
       const startTime = Date.now();
       const check = () => {
@@ -312,7 +302,7 @@
       if (origText && origText.startsWith(anchor)) {
         // If element is detached, text may be stale — check container for a fresher version
         if (!firstElement.isConnected) {
-          const newFirst = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+          const newFirst = findFirstContentElement(container);
           if (newFirst) {
             const newText = extractText(newFirst);
             if (newText && newText.startsWith(anchor)) {
@@ -323,8 +313,8 @@
         return origText;
       }
 
-      // 2. Original element is stale/reused — try container's current first <p>
-      const newFirst = container.querySelector('p, h1, h2, h3, h4, h5, h6, pre, blockquote');
+      // 2. Original element is stale/reused — try container's current first real content node
+      const newFirst = findFirstContentElement(container);
       if (newFirst) {
         const newText = extractText(newFirst);
         if (newText && newText.startsWith(anchor)) return newText;

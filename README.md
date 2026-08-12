@@ -39,6 +39,7 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 ### Smart Content Detection
 - Automatically detects paragraphs (`<p>`), headings (`<h1>`-`<h6>`), lists (`<ul>`, `<ol>`), code blocks (`<pre>`), blockquotes, and tables
 - **Thinking filter** — Claude's thinking/reasoning section (reasoning text, web search results, tool timelines) is automatically excluded via `getResponseScope()` positive scoping — only the actual response container is observed, so thinking content is never even seen
+- **Screen-reader heading filter** — Claude injects an `h2.sr-only` announcement (`Claude responded: …`) as the first child of each assistant message. Auto-send and inline buttons ignore it and bind to the real markdown paragraph instead
 - Preserves Markdown formatting: `*bold*`, `_italic_`, `` `code` ``
 - Handles code blocks with language detection
 - Splits long messages automatically (4096 char Telegram limit)
@@ -160,7 +161,15 @@ COMPLETE:    <p>Hello world</p>  <- Ready to capture!
 
 **Claude** uses a `data-is-streaming` attribute on response containers:
 ```
-STREAMING (thinking model):
+CURRENT (completed or streaming):
+  div[data-is-streaming]
+    ├── h2.sr-only.select-none     ← "Claude responded: …" (ignored)
+    └── div.font-claude-response
+        └── .standard-markdown / .progressive-markdown
+            ├── <p>Hello world</p>  ← first real chunk (captured)
+            └── <p>More text...</p>
+
+STREAMING (older thinking-model grid):
   div[data-is-streaming="true"]
     └── div.font-claude-response
         └── div.grid
@@ -170,24 +179,14 @@ STREAMING (thinking model):
                 │   └── .standard-markdown / .progressive-markdown
                 └── div.row-start-1 z-[3]    ← .font-ui tool timeline (ignored)
                     └── web search, reasoning steps, etc.
-
-STREAMING (non-thinking model):
-  div[data-is-streaming="true"]
-    └── .progressive-markdown / .standard-markdown
-        └── <p>Hello world</p>
-
-COMPLETE:
-  div[data-is-streaming="false"]
-    └── div > .standard-markdown
-        ├── <p>Hello world</p>
-        └── <p>More text...</p>
 ```
 
 `getResponseScope(container)` narrows observation to the actual response:
-- Finds `.row-start-2`, then returns the child `.row-start-1` that does NOT contain `.font-ui` (the tool timeline)
+- Prefers `.standard-markdown` / `.progressive-markdown` (or `.font-claude-response`) so the sibling `h2.sr-only` announcement is never seen
+- Older thinking grid: finds `.row-start-2`, then the child `.row-start-1` that does NOT contain `.font-ui`
 - If `.row-start-2` has no non-`.font-ui` child yet, returns `null` (response not ready)
-- Non-thinking models have no grid — falls back to the full container
-- All element queries (`processContainer`, `isElementStreaming`, `waitForFirstElement`) run against the scoped node, so thinking/tool content is never seen
+- `findFirstContentElement()` also skips `.sr-only` nodes as defense in depth
+- All element queries (`processContainer`, `isElementStreaming`, `waitForFirstElement`) run against the scoped node, so thinking/tool/announcement content is never captured
 
 Claude restructures its DOM when streaming completes — Persephone handles this by tracking text anchors and reading from the rebuilt DOM to capture the complete text.
 
@@ -364,6 +363,9 @@ Content is converted to Telegram Markdown:
 - Make sure you're on grok.com or claude.ai
 - Check the browser console for errors (F12 → Console)
 
+**Live stream is just `Claude responded: …`:**
+- That string is Claude's screen-reader heading (`h2.sr-only`), not the real answer. Reload the extension after v5.4 so auto-send binds to the first markdown paragraph instead.
+
 **Live stream missing last words:**
 - This can happen when Claude restructures its DOM after streaming completes. The extension reads from the rebuilt DOM to capture the full text. If it persists, the final edit should contain the complete paragraph.
 
@@ -399,6 +401,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v5.4** - Ignore Claude's `h2.sr-only` "Claude responded:" announcement so auto-send binds to the real first markdown paragraph
 - **v5.3** - Screenshot region crop (drag once after picking a window, reused every capture; Shift+click to re-pick, Enter for full window) and adjustable JPEG quality slider in the popup
 - **v5.2** - Voice auto-restart mic (re-activate after voice submit with configurable delay), mic button race condition fix (re-entrancy guard prevents rapid-click state desync)
 - **v5.1** - First chunk word limit (configurable split point for auto-streamed first chunk), tab connectivity indicators (green/grey dots for reachable/stale tabs), selector health check improvements
