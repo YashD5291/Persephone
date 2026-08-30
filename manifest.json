@@ -36,6 +36,7 @@
         "content/constants.js",
         "content/logger.js",
         "content/state.js",
+        "content/pretext.js",
         "content/selectors.js",
         "content/text.js",
         "content/telegram.js",

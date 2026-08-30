@@ -9,7 +9,8 @@
     editInTelegram, showToast, triggerPreconnect, loadSettings, toggleExtensionEnabled, 
     showExtensionIndicator, toggleAutoSend, showAutoSendIndicator, updateWidgetStates, 
     injectStyles, injectMicButton, injectSettingsWidget, injectScreenshotButton, handleMicClick, 
-    insertTextAndSubmit, dataUrlToBlob, pasteScreenshotIntoChat
+    insertTextAndSubmit, dataUrlToBlob, pasteScreenshotIntoChat, loadPreText,
+    startPreTextUrlWatcher
   } = P;
 
   // ============================================
@@ -37,6 +38,7 @@
         voiceAutoRestart: state.voiceAutoRestart,
         voiceRestartDelay: state.voiceRestartDelay,
         autoSendSkipKeywords: state.autoSendSkipKeywords,
+        preText: state.preText,
       },
 
       streaming: {
@@ -101,6 +103,10 @@
 
     // Load settings — await so observers start with correct state
     await loadSettings();
+
+    // Per-chat pre-text: load for this URL, then follow SPA navigation
+    await loadPreText();
+    startPreTextUrlWatcher();
 
     // Trigger API preconnect immediately
     triggerPreconnect();

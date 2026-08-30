@@ -55,6 +55,15 @@ A Chrome extension that monitors [grok.com](https://grok.com) and [claude.ai](ht
 - Keyboard shortcut: `Alt+M` to toggle recording
 - Mic button turns red and pulses while recording
 
+### Per-Chat Pre-Text
+- **Pre-text box** in the settings widget (gear icon) — enter a standing instruction like `Answer this question in 200 words:`
+- It is **prepended to voice transcriptions** before they land in the chat box, joined with a single space
+- **Stored per chat URL**, so each conversation keeps its own pre-text; other chats are unaffected
+- Saved automatically as you type (and on blur); clearing the box removes it for that chat
+- A pre-text set on a blank chat (`claude.ai/new`, `grok.com/`) is **carried over** when the first message turns it into a real conversation URL
+- Applies **only in the tab you dictate in** — broadcast copies sent to other open Grok/Claude tabs are inserted as-is, without any pre-text
+- Stored in `chrome.storage.local` (not synced), since entries accumulate per conversation
+
 ### Screenshot Capture
 - **Floating camera button** on Grok/Claude pages — click to capture a screenshot from another window (e.g., Zoom, slides)
 - First click opens Chrome's window/screen picker via `getDisplayMedia()` — select the window you want to capture
@@ -267,6 +276,7 @@ Persephone/
 │   ├── constants.js       # MSG constants, shared namespace init
 │   ├── logger.js          # Structured logger with categories
 │   ├── state.js           # Centralized state, container ID tracking
+│   ├── pretext.js         # Per-chat-URL pre-text storage and prepending
 │   ├── selectors.js       # Site detection, selector registry with fallbacks
 │   ├── text.js            # Text extraction, hashing, formatting
 │   ├── telegram.js        # Telegram API calls from content script
@@ -348,6 +358,7 @@ Content is converted to Telegram Markdown:
 | Extension | Master toggle (same as popup) |
 | Voice auto-submit | Toggle auto-submit for voice input |
 | Voice auto-restart | Toggle mic auto-restart after voice submit |
+| Pre-text (this chat) | Text prepended to voice transcriptions; saved per chat URL |
 | Auto-send (per tab) | Toggle auto-send individually for each open Grok/Claude tab |
 | Split threshold | Adjust sub-chunk split threshold |
 | 1st chunk words | Adjust first chunk word limit |
@@ -401,6 +412,7 @@ Content is converted to Telegram Markdown:
 
 ## Version History
 
+- **v5.5** - Per-chat pre-text: a prompt prefix set in the settings widget, stored per chat URL and prepended to voice transcriptions
 - **v5.4** - Ignore Claude's `h2.sr-only` "Claude responded:" announcement so auto-send binds to the real first markdown paragraph
 - **v5.3** - Screenshot region crop (drag once after picking a window, reused every capture; Shift+click to re-pick, Enter for full window) and adjustable JPEG quality slider in the popup
 - **v5.2** - Voice auto-restart mic (re-activate after voice submit with configurable delay), mic button race condition fix (re-entrancy guard prevents rapid-click state desync)

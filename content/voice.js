@@ -2,7 +2,7 @@
   'use strict';
   const P = window.Persephone;
 
-  const { sel, state, MSG, log, SITE } = P;
+  const { sel, state, MSG, log, SITE, applyPreText } = P;
 
   // Late-bound (defined in modules that load after this one):
   const showToast = (...args) => P.showToast(...args);
@@ -244,7 +244,7 @@
         log.voice('TRANSCRIPTION:', transcription);
         log.voice('🎙️ Transcription:', transcription);
 
-        // Broadcast to other Grok/Claude tabs BEFORE submitting locally
+        // Broadcast the raw transcription — other tabs get it without pre-text.
         log.voice('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
         try {
           chrome.runtime.sendMessage({ type: MSG.BROADCAST_QUESTION, text: current })
@@ -254,18 +254,31 @@
           log.voice.error('🎙️ Broadcast send threw:', e);
         }
 
-        if (state.autoSubmitVoice) {
-          // Focus input and poke the framework before submitting
-          input.focus();
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          submitChatInput();
+        // Prepend this chat's pre-text so it sits in front of the transcription.
+        const withPreText = applyPreText(current);
+        const rewrote = withPreText !== current;
+        if (rewrote) {
+          setInputText(input, withPreText);
+          log.voice('🎙️ Pre-text prepended');
+        }
 
-          // Auto-restart mic after a delay if enabled
-          if (state.voiceAutoRestart) {
-            log.voice(`🎙️ Auto-restart in ${state.voiceRestartDelay}s`);
-            setTimeout(() => handleMicClick(), state.voiceRestartDelay * 1000);
-          }
+        if (state.autoSubmitVoice) {
+          const submit = () => {
+            // Focus input and poke the framework before submitting
+            input.focus();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            submitChatInput();
+
+            // Auto-restart mic after a delay if enabled
+            if (state.voiceAutoRestart) {
+              log.voice(`🎙️ Auto-restart in ${state.voiceRestartDelay}s`);
+              setTimeout(() => handleMicClick(), state.voiceRestartDelay * 1000);
+            }
+          };
+
+          // Let ProseMirror sync the rewritten content before submitting
+          if (rewrote) setTimeout(submit, 100); else submit();
         }
       }
     }, POLL_MS);
@@ -285,23 +298,11 @@
   }
 
   /**
-   * Insert text into the chat input and submit (used by broadcast from other tabs).
-   * Uses multiple strategies because execCommand requires focus which the
-   * non-active tab in split view may not have.
+   * Replace the chat input's content with `text` and poke the framework so it
+   * picks up the change. Uses multiple strategies because execCommand requires
+   * focus which the non-active tab in split view may not have.
    */
-  function insertTextAndSubmit(text, options = {}) {
-    const focusInput = options.focusInput === true;
-    log.voice('🎙️ Broadcast received:', text.substring(0, 50));
-    const input = findChatInput();
-    if (!input) {
-      log.voice.warn('🎙️ Broadcast: no chat input found');
-      return;
-    }
-
-    if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
-      input.focus();
-    }
-
+  function setInputText(input, text) {
     let inserted = false;
 
     if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
@@ -323,7 +324,6 @@
         log.voice('🎙️ execCommand did not work, using innerHTML fallback');
         // Direct DOM manipulation — ProseMirror's DOMObserver picks up mutations
         input.innerHTML = '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>';
-        inserted = true;
       }
     }
 
@@ -331,6 +331,27 @@
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /**
+   * Insert text into the chat input and submit (used by broadcast from other tabs).
+   * Broadcast text is inserted as-is — pre-text applies only in the tab that
+   * actually dictated it.
+   */
+  function insertTextAndSubmit(text, options = {}) {
+    const focusInput = options.focusInput === true;
+    log.voice('🎙️ Broadcast received:', text.substring(0, 50));
+    const input = findChatInput();
+    if (!input) {
+      log.voice.warn('🎙️ Broadcast: no chat input found');
+      return;
+    }
+
+    if (focusInput && document.visibilityState === 'visible' && document.hasFocus()) {
+      input.focus();
+    }
+
+    setInputText(input, text);
 
     // Small delay to let ProseMirror sync its internal state before submitting
     setTimeout(() => {
@@ -425,7 +446,7 @@
   Object.assign(P, {
     isVisibleElement, scoreChatInputCandidate, findChatInput, findChatInputWithRetry, 
     placeCaretAtEnd, getComposerRoot, getAttachmentSignalCount, dispatchImagePaste, 
-    dispatchImageDrop, submitChatInput, getInputValue, watchForTranscription, insertTextAndSubmit, 
+    dispatchImageDrop, submitChatInput, getInputValue, setInputText, watchForTranscription, insertTextAndSubmit,
     handleMicClick, injectMicButton
   });
 })();
