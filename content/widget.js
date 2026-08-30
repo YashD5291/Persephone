@@ -3,7 +3,8 @@
   const P = window.Persephone;
 
   const {
-    SITE, MSG, state, log, sel, isContextValid, scanAllResponses, removeAllButtons, showToast
+    SITE, MSG, state, log, sel, isContextValid, scanAllResponses, removeAllButtons, showToast,
+    savePreText
   } = P;
 
   // ============================================
@@ -172,6 +173,11 @@
     if (wordLimitInput && document.activeElement !== wordLimitInput) {
       wordLimitInput.value = state.firstChunkWordLimit;
     }
+
+    const preTextInput = panel.querySelector('[data-key="preText"]');
+    if (preTextInput && document.activeElement !== preTextInput) {
+      preTextInput.value = state.preText || '';
+    }
   }
 
   function injectSettingsWidget() {
@@ -246,6 +252,36 @@
       row.appendChild(toggle);
       panel.appendChild(row);
     });
+
+    // Pre-text section — stored per chat URL, prepended to voice transcriptions
+    const preTextSection = document.createElement('div');
+    preTextSection.className = 'persephone-panel-section';
+    preTextSection.textContent = 'Pre-text (this chat)';
+    panel.appendChild(preTextSection);
+
+    const preTextRow = document.createElement('div');
+    preTextRow.className = 'persephone-panel-textarea-row';
+
+    const preTextInput = document.createElement('textarea');
+    preTextInput.className = 'persephone-panel-textarea';
+    preTextInput.rows = 2;
+    preTextInput.placeholder = 'e.g. Answer this question in 200 words:';
+    preTextInput.title = 'Added in front of voice-transcribed text. Saved for this chat URL only.';
+    preTextInput.value = state.preText || '';
+    preTextInput.setAttribute('data-key', 'preText');
+
+    let preTextDebounce = null;
+    preTextInput.addEventListener('input', () => {
+      clearTimeout(preTextDebounce);
+      preTextDebounce = setTimeout(() => savePreText(preTextInput.value), 500);
+    });
+    preTextInput.addEventListener('blur', () => {
+      clearTimeout(preTextDebounce);
+      savePreText(preTextInput.value);
+    });
+
+    preTextRow.appendChild(preTextInput);
+    panel.appendChild(preTextRow);
 
     // Auto-send tab list section
     const tabSection = document.createElement('div');

@@ -564,6 +564,34 @@
         transform: translateX(16px);
       }
 
+      /* Pre-text textarea */
+      .persephone-panel-textarea-row {
+        padding: 10px 16px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .persephone-panel-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        background: #fafafa;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        color: #1a1a1a;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1.4;
+        resize: vertical;
+        min-height: 46px;
+        transition: border-color 0.2s;
+      }
+      .persephone-panel-textarea:focus {
+        outline: none;
+        border-color: #1a1a1a;
+      }
+      .persephone-panel-textarea::placeholder {
+        color: #aaa;
+      }
+
       /* Tab List Section */
       .persephone-panel-section {
         padding: 8px 16px 4px;

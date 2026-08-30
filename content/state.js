@@ -30,6 +30,7 @@
     voiceAutoRestart: false,
     voiceRestartDelay: 3,
     autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
+    preText: '',                     // Per-chat-URL prefix for transcribed voice input
 
     // Streaming detection
     currentStreamingContainer: null,
