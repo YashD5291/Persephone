@@ -2,7 +2,7 @@
   'use strict';
   const P = window.Persephone;
 
-  const { sel, state, MSG, log, SITE } = P;
+  const { sel, state, MSG, log, SITE, applyPreText } = P;
 
   // ProseMirror needs a moment to take in text written from outside before
   // the send button will submit it.
@@ -249,7 +249,7 @@
         log.voice('TRANSCRIPTION:', transcription);
         log.voice('🎙️ Transcription:', transcription);
 
-        // Broadcast to other Grok/Claude tabs BEFORE submitting locally
+        // Broadcast the raw transcription — other tabs get it without pre-text.
         log.voice('🎙️ Broadcasting to other tabs, text:', current.substring(0, 50));
         try {
           chrome.runtime.sendMessage({ type: MSG.BROADCAST_QUESTION, text: current })
@@ -259,19 +259,32 @@
           log.voice.error('🎙️ Broadcast send threw:', e);
         }
 
-        if (state.autoSubmitVoice) {
-          // Focus input and poke the framework before submitting
-          input.focus();
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          submitChatInput();
-          if (state.voiceTiming) state.voiceTiming.submit = performance.now();
+        // Prepend this chat's pre-text so it sits in front of the transcription.
+        const withPreText = applyPreText(current);
+        const rewrote = withPreText !== current;
+        if (rewrote) {
+          setInputText(input, withPreText);
+          log.voice('🎙️ Pre-text prepended');
+        }
 
-          // Auto-restart mic after a delay if enabled
-          if (state.voiceAutoRestart) {
-            log.voice(`🎙️ Auto-restart in ${state.voiceRestartDelay}s`);
-            setTimeout(() => handleMicClick(), state.voiceRestartDelay * 1000);
-          }
+        if (state.autoSubmitVoice) {
+          const submit = () => {
+            // Focus input and poke the framework before submitting
+            input.focus();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            submitChatInput();
+            if (state.voiceTiming) state.voiceTiming.submit = performance.now();
+
+            // Auto-restart mic after a delay if enabled
+            if (state.voiceAutoRestart) {
+              log.voice(`🎙️ Auto-restart in ${state.voiceRestartDelay}s`);
+              setTimeout(() => handleMicClick(), state.voiceRestartDelay * 1000);
+            }
+          };
+
+          // Let ProseMirror sync the rewritten content before submitting
+          if (rewrote) setTimeout(submit, EDITOR_SYNC_MS); else submit();
         }
       }
     }, POLL_MS);
@@ -296,8 +309,7 @@
    * non-active tab in split view may not have. Returns false if there is no
    * chat input to write to.
    */
-  function setChatInputText(text) {
-    const input = findChatInput();
+  function setChatInputText(text, input = findChatInput()) {
     if (!input) return false;
     if (getInputValue(input).trim() === text.trim()) return true;
 
@@ -329,8 +341,13 @@
     return true;
   }
 
+  /** Pre-text writes into the input it already holds. */
+  const setInputText = (input, text) => setChatInputText(text, input);
+
   /**
    * Insert text into the chat input and submit (used by broadcast from other tabs).
+   * Broadcast text is inserted as-is: pre-text applies only in the tab that
+   * actually dictated it.
    */
   function insertTextAndSubmit(text, options = {}) {
     const focusInput = options.focusInput === true;
@@ -897,7 +914,7 @@
   Object.assign(P, {
     isVisibleElement, scoreChatInputCandidate, findChatInput, findChatInputWithRetry, 
     placeCaretAtEnd, getComposerRoot, getAttachmentSignalCount, dispatchImagePaste, 
-    dispatchImageDrop, submitChatInput, getInputValue, watchForTranscription, insertTextAndSubmit, 
+    dispatchImageDrop, submitChatInput, getInputValue, setInputText, watchForTranscription, insertTextAndSubmit, 
     setChatInputText, handleLiveText, handleLiveStatus, handleLiveState, setLiveActive, submitLiveQuestion, 
     liveTextHere, syncLiveState, injectLiveButton, handleMicClick, injectMicButton
   });

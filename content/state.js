@@ -34,6 +34,7 @@
     liveTargetTabId: null,           // chat tab chosen to receive live text (null = where the mic is pressed)
     liveTargetHere: false,           // this tab is that chosen chat
     autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
+    preText: '',                     // Per-chat-URL prefix for transcribed voice input
 
     // Streaming detection
     currentStreamingContainer: null,
