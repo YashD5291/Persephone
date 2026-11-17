@@ -100,8 +100,13 @@ chmod +x "$DIR/native-host/persephone_host.py" "$DIR/native-host/live/build.sh"
 
 bold "Building the live text helper (first build takes a minute or two)..."
 "$DIR/native-host/live/build.sh"
-LIVE_BINARY="$DIR/native-host/live/.build/release/persephone-live"
-[ -x "$LIVE_BINARY" ] || fail "The live text helper did not build."
+BUILT="$DIR/native-host/live/.build/release/persephone-live"
+[ -x "$BUILT" ] || fail "The live text helper did not build."
+# Chrome runs the helper from a folder you can see in Finder (.build is hidden),
+# so it can be picked by hand under Privacy & Security > Accessibility.
+LIVE_BINARY="$DIR/native-host/live/bin/persephone-live"
+mkdir -p "$(dirname "$LIVE_BINARY")"
+cp -f "$BUILT" "$LIVE_BINARY"
 echo
 
 # --- 4. Register with Chrome --------------------------------------------------
@@ -141,5 +146,10 @@ Finish setting up (one time per Mac):
      Captions panel, pick the audio source your call arrives on (e.g. Loopback Audio).
   5. The first time live text is switched on, macOS asks to allow
      "persephone-live" under Privacy & Security > Accessibility. Allow it,
-     then switch live text on again.
+     then switch live text on again. To add it by hand instead: click + in
+     that list and choose the file this installer just showed in Finder.
 EOF
+echo "Helper: $LIVE_BINARY"
+# Show the helper in Finder and open the Accessibility list, ready to add it by hand.
+open -R "$LIVE_BINARY" 2>/dev/null || true
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
