@@ -3,7 +3,7 @@
   const P = window.Persephone;
 
   const {
-    SITE, MSG, state, log, sel, isContextValid, scanAllResponses, removeAllButtons, showToast
+    SITE, MSG, DEFAULT_SKIP_KEYWORDS, state, log, sel, isContextValid, scanAllResponses, removeAllButtons, showToast
   } = P;
 
   // ============================================
@@ -15,7 +15,7 @@
 
     try {
       const autoSendKey = SITE === 'claude' ? 'autoSendClaude' : 'autoSendGrok';
-      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice', 'voiceAutoRestart', 'voiceRestartDelay', 'screenshotJpegQuality']);
+      const settings = await chrome.storage.sync.get(['extensionEnabled', autoSendKey, 'autoSendSkipKeywords', 'splitThreshold', 'firstChunkWordLimit', 'autoSubmitVoice', 'voiceAutoRestart', 'voiceRestartDelay', 'voiceLiveCaptions', 'screenshotJpegQuality']);
       state.extensionEnabled = settings.extensionEnabled !== false; // Default true
       state.autoSendFirstChunk = settings[autoSendKey] !== false; // Default true
       state.autoSendSkipKeywords = settings.autoSendSkipKeywords || [...DEFAULT_SKIP_KEYWORDS];
@@ -24,6 +24,7 @@
       state.autoSubmitVoice = settings.autoSubmitVoice === true; // Default false
       state.voiceAutoRestart = settings.voiceAutoRestart === true; // Default false
       state.voiceRestartDelay = settings.voiceRestartDelay || 3;
+      state.voiceLiveCaptions = settings.voiceLiveCaptions === true; // Default false
       state.screenshotJpegQuality = settings.screenshotJpegQuality || 0.85;
 
       // Check for per-tab override (persisted in background)
@@ -38,23 +39,30 @@
       }
 
       log.state(`🔌 Extension: ${state.extensionEnabled ? 'ON' : 'OFF'}, Auto-send: ${state.autoSendFirstChunk ? 'ON' : 'OFF'}, Skip keywords: ${state.autoSendSkipKeywords.length}`);
+      updateExtensionSwitch();
     } catch (e) {
-      log.state.error('Failed to load settings');
+      // Say why: without the reason this error cannot be told apart from a real settings problem.
+      log.state.error('Failed to load settings:', e?.message || e);
     }
   }
 
-  function toggleExtensionEnabled() {
-    state.extensionEnabled = !state.extensionEnabled;
+  /**
+   * Switch the extension on or off from this page. Every control that does it
+   * (the outside switch, the panel switch, the keyboard shortcut) goes through
+   * here, so they cannot drift apart.
+   */
+  function setExtensionEnabled(enabled) {
+    state.extensionEnabled = enabled;
 
     // Save to storage
     if (isContextValid()) {
-      chrome.storage.sync.set({ extensionEnabled: state.extensionEnabled });
+      chrome.storage.sync.set({ extensionEnabled: enabled });
     }
 
     // Show indicator and update UI
-    showExtensionIndicator(state.extensionEnabled);
+    showExtensionIndicator(enabled);
 
-    if (state.extensionEnabled) {
+    if (enabled) {
       // Re-scan when enabled
       scanAllResponses();
     } else {
@@ -62,7 +70,12 @@
       removeAllButtons();
     }
 
-    log.state(`🔌 Extension toggled: ${state.extensionEnabled ? 'ON' : 'OFF'}`);
+    updateWidgetStates();
+    log.state(`🔌 Extension switched: ${enabled ? 'ON' : 'OFF'}`);
+  }
+
+  function toggleExtensionEnabled() {
+    setExtensionEnabled(!state.extensionEnabled);
   }
 
   function showExtensionIndicator(enabled) {
@@ -146,6 +159,8 @@
    * Called when settings change externally (popup, keyboard shortcut, storage).
    */
   function updateWidgetStates() {
+    // The outside switch is always on the page, whether the panel is open or not.
+    updateExtensionSwitch();
     const panel = document.querySelector('.persephone-settings-panel');
     if (!panel || panel.classList.contains('hidden')) return;
 
@@ -157,6 +172,9 @@
 
     const restartToggle = panel.querySelector('[data-key="voiceAutoRestart"]');
     if (restartToggle) restartToggle.checked = state.voiceAutoRestart;
+
+    const liveToggle = panel.querySelector('[data-key="voiceLiveCaptions"]');
+    if (liveToggle) liveToggle.checked = state.voiceLiveCaptions;
 
     const restartDelayInput = panel.querySelector('[data-key="voiceRestartDelay"]');
     if (restartDelayInput && document.activeElement !== restartDelayInput) {
@@ -172,6 +190,40 @@
     if (wordLimitInput && document.activeElement !== wordLimitInput) {
       wordLimitInput.value = state.firstChunkWordLimit;
     }
+  }
+
+  /** Show on the outside switch whether the extension is on. */
+  function updateExtensionSwitch() {
+    const control = document.querySelector('.persephone-ext-switch');
+    if (!control) return;
+    control.querySelector('input').checked = state.extensionEnabled;
+    control.title = state.extensionEnabled
+      ? 'Persephone is on (click to switch it off)'
+      : 'Persephone is off (click to switch it on)';
+  }
+
+  /**
+   * The extension's on/off switch, on the page itself: the same switch as the
+   * first row of the settings panel, reachable without opening the panel.
+   */
+  function injectExtensionSwitch() {
+    if (document.querySelector('.persephone-ext-switch')) return;
+
+    const control = document.createElement('label');
+    control.className = 'persephone-ext-switch';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    const track = document.createElement('span');
+    track.className = 'persephone-ext-track';
+    control.appendChild(checkbox);
+    control.appendChild(track);
+
+    // Keep the caret in the chat box, as the other floating buttons do.
+    control.addEventListener('mousedown', (e) => e.preventDefault());
+    checkbox.addEventListener('change', () => setExtensionEnabled(checkbox.checked));
+
+    document.body.appendChild(control);
+    updateExtensionSwitch();
   }
 
   function injectSettingsWidget() {
@@ -205,6 +257,7 @@
       { label: 'Extension', key: 'extensionEnabled', get: () => state.extensionEnabled },
       { label: 'Voice auto-submit', key: 'autoSubmitVoice', get: () => state.autoSubmitVoice },
       { label: 'Voice auto-restart', key: 'voiceAutoRestart', get: () => state.voiceAutoRestart },
+      { label: 'Live text (Live Captions)', key: 'voiceLiveCaptions', get: () => state.voiceLiveCaptions },
     ];
 
     simpleRows.forEach(({ label, key, get }) => {
@@ -229,16 +282,16 @@
       checkbox.addEventListener('change', () => {
         const val = checkbox.checked;
         if (key === 'extensionEnabled') {
-          state.extensionEnabled = val;
-          chrome.storage.sync.set({ extensionEnabled: val });
-          showExtensionIndicator(val);
-          if (val) { scanAllResponses(); } else { removeAllButtons(); }
+          setExtensionEnabled(val);
         } else if (key === 'autoSubmitVoice') {
           state.autoSubmitVoice = val;
           chrome.storage.sync.set({ autoSubmitVoice: val });
         } else if (key === 'voiceAutoRestart') {
           state.voiceAutoRestart = val;
           chrome.storage.sync.set({ voiceAutoRestart: val });
+        } else if (key === 'voiceLiveCaptions') {
+          state.voiceLiveCaptions = val;
+          chrome.storage.sync.set({ voiceLiveCaptions: val });
         }
       });
 
@@ -250,7 +303,7 @@
     // Auto-send tab list section
     const tabSection = document.createElement('div');
     tabSection.className = 'persephone-panel-section';
-    tabSection.textContent = 'Auto-send';
+    tabSection.textContent = 'Chats (mic = live text target, switch = auto-send)';
     panel.appendChild(tabSection);
 
     const tabListContainer = document.createElement('div');
@@ -393,6 +446,20 @@
             info.appendChild(current);
           }
 
+          // Live text target: the one chat whose box receives the live words.
+          // Clicking the chosen one again clears the choice ("wherever I press the mic").
+          const isTarget = tab.id === response.liveTargetTabId;
+          const target = document.createElement('button');
+          target.type = 'button';
+          target.className = `persephone-tab-target${isTarget ? ' active' : ''}${tab.id === response.liveTabId ? ' live' : ''}`;
+          target.title = isTarget ? 'Live text goes to this chat (click to clear)' : 'Send live text to this chat';
+          target.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>';
+          target.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await chrome.runtime.sendMessage({ type: MSG.LIVE_SET_TARGET, tabId: isTarget ? null : tab.id });
+            fetchAndRenderTabs();
+          });
+
           const toggle = document.createElement('label');
           toggle.className = 'persephone-panel-toggle';
           const checkbox = document.createElement('input');
@@ -419,6 +486,7 @@
           });
 
           row.appendChild(info);
+          row.appendChild(target);
           row.appendChild(toggle);
           tabListContainer.appendChild(row);
         });
@@ -459,7 +527,7 @@
 
   // --- Exports ---
   Object.assign(P, {
-    loadSettings, toggleExtensionEnabled, showExtensionIndicator, toggleAutoSend, 
-    showAutoSendIndicator, updateWidgetStates, injectSettingsWidget
+    loadSettings, setExtensionEnabled, toggleExtensionEnabled, showExtensionIndicator, toggleAutoSend, 
+    showAutoSendIndicator, updateWidgetStates, injectSettingsWidget, injectExtensionSwitch
   });
 })();

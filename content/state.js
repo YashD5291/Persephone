@@ -29,6 +29,10 @@
     autoSubmitVoice: false,
     voiceAutoRestart: false,
     voiceRestartDelay: 3,
+    voiceLiveCaptions: false,
+    liveActive: false,               // live text is running (in this tab or another)
+    liveTargetTabId: null,           // chat tab chosen to receive live text (null = where the mic is pressed)
+    liveTargetHere: false,           // this tab is that chosen chat
     autoSendSkipKeywords: [...DEFAULT_SKIP_KEYWORDS],
 
     // Streaming detection
@@ -53,6 +57,8 @@
     screenshotCropRegion: null,      // {x,y,w,h} normalized 0–1, or null for full frame
     pendingScreenshots: [],
     micRecording: false,
+    // performance.now() marks for the voice question in flight: clicked, stop, transcript, submit
+    voiceTiming: null,
 
     // Health check
     healthCheckWarned: false,

@@ -1,0 +1,397 @@
+{
+"recorded": "2026-10-13, MacWhisper Live Captions (Parakeet v3), synthetic interview questions played into Loopback Audio",
+"marks": [
+0.024,
+6.557,
+13.017,
+20.088,
+24.813,
+30.155,
+36.71,
+43.003,
+48.888,
+54.871
+],
+"snapshots": [
+[
+-0.472,
+""
+],
+[
+1.888,
+"Describe"
+],
+[
+2.264,
+"Describe how you would"
+],
+[
+2.588,
+"Describe how you would partition"
+],
+[
+3.08,
+"Describe how you would partition air"
+],
+[
+3.27,
+"Describe how you would partition a very large"
+],
+[
+3.579,
+"Describe how you would partition a very large table"
+],
+[
+3.92,
+"Describe how you would partition a very large table in a"
+],
+[
+4.278,
+"Describe how you would partition a very large table in a data way"
+],
+[
+4.627,
+"Describe how you would partition a very large table in a data warehouse"
+],
+[
+7.945,
+"Describe how you would partition a very large table in a data warehouse."
+],
+[
+8.295,
+"Describe how you would partition a very large table in a data warehouse. How would you"
+],
+[
+8.68,
+"Describe how you would partition a very large table in a data warehouse. How would you detect"
+],
+[
+8.888,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data"
+],
+[
+9.505,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data drift on"
+],
+[
+9.848,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data drift after"
+],
+[
+10.456,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data drift after a mod"
+],
+[
+11.11,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data drift after a model has been"
+],
+[
+11.298,
+"Describe how you would partition a very large table in a data warehouse. How would you detect data drift after a model has been deployed?"
+],
+[
+14.376,
+"Describe how you would partition a very large table in a data warehouse How would you detect data drift after a model has been deployed?"
+],
+[
+14.592,
+"Describe how you would partition a very large table in a data warehouse"
+],
+[
+14.782,
+"How would you detect data drift after a model has been deployed? How do you"
+],
+[
+14.959,
+"How would you detect data drift after a model has been deployed? How do you have"
+],
+[
+15.284,
+"How would you detect data drift after a model has been deployed? How do you handle c"
+],
+[
+15.675,
+"How would you detect data drift after a model has been deployed? How do you handle class?"
+],
+[
+15.934,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance?"
+],
+[
+16.218,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance"
+],
+[
+16.533,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the"
+],
+[
+16.842,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the positive"
+],
+[
+17.264,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the positive class"
+],
+[
+17.861,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the positive class is very"
+],
+[
+18.308,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the positive class is very rare"
+],
+[
+22.046,
+"How would you detect data drift after a model has been deployed? How do you handle class imbalance when the positive class is very rare?"
+],
+[
+22.178,
+"Why did you leave"
+],
+[
+22.401,
+"Why did you leave your life"
+],
+[
+22.814,
+"Why did you leave your last ro"
+],
+[
+26.094,
+"Why did you leave your last roll?"
+],
+[
+26.434,
+"Why did you leave your last roll? What is a"
+],
+[
+26.79,
+"Why did you leave your last roll? What is overfi"
+],
+[
+27.084,
+"Why did you leave your last role? What is overfitting it?"
+],
+[
+27.375,
+"Why did you leave your last role? What is overfitting and how"
+],
+[
+27.694,
+"Why did you leave your last role? What is overfitting and how do you"
+],
+[
+28.024,
+"Why did you leave your last role? What is overfitting and how do you prevent"
+],
+[
+28.335,
+"Why did you leave your last role? What is overfitting and how do you prevent it?"
+],
+[
+31.83,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is"
+],
+[
+32.151,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the"
+],
+[
+32.474,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the difference?"
+],
+[
+32.758,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the difference between"
+],
+[
+33.05,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the difference between a"
+],
+[
+33.366,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the difference between a left?"
+],
+[
+33.792,
+"Why did you leave your last roll? What is overfitting and how do you prevent it? What is the difference between a left joint?"
+],
+[
+34.117,
+"Why did you leave your last roll? What is overfitting and how do you prevent it? What is the difference between a left joint and a"
+],
+[
+34.385,
+"Why did you leave your last role? What is overfitting and how do you prevent it? What is the difference between a left join and an inner"
+],
+[
+34.575,
+"Why did you leave your last role? What is overfitting and how do you prevent it?"
+],
+[
+34.701,
+"What is the difference between a left join and an inner joint?"
+],
+[
+38.183,
+"What is the difference between a left join and an inner join?"
+],
+[
+38.348,
+"What is the difference between a left join and an inner join? What is I"
+],
+[
+38.684,
+"What is the difference between a left join and an inner join? What does I depose?"
+],
+[
+39.108,
+"What is the difference between a left join and an inner join? What does it appoint me?"
+],
+[
+39.476,
+"What is the difference between a left join and an inner join? What does ideode mean?"
+],
+[
+39.799,
+"What is the difference between a left join and an inner join? What does idapon mean and why"
+],
+[
+40.124,
+"What is the difference between a left join and an inner join? What does IDA potent mean? And why does it"
+],
+[
+40.482,
+"What is the difference between a left join and an inner join? What does IDO mean? And why does it matter for"
+],
+[
+40.809,
+"What is the difference between a left join and an inner join? What does ID potent mean? And why does it matter for each?"
+],
+[
+41.116,
+"What is the difference between a left join and an inner join? What does ID potent mean and why does it matter for each try?"
+],
+[
+44.619,
+"What is the difference between a left join and an inner join? What does IDPOT mean and why does it matter for each rise?"
+],
+[
+44.65,
+"What is the difference between a left join and an inner join? What does IDPOT mean, and why does it matter for each rise?"
+],
+[
+44.75,
+"How do"
+],
+[
+44.866,
+"How do window"
+],
+[
+45.175,
+"How the window fa"
+],
+[
+45.515,
+"How the window function"
+],
+[
+45.793,
+"How the window functions do"
+],
+[
+46.175,
+"How do window functions differ from"
+],
+[
+46.507,
+"How do window functions differ from crowd"
+],
+[
+46.809,
+"How do window functions differ from group"
+],
+[
+48.597,
+"How do window functions differ from group by?"
+],
+[
+50.459,
+"How do window functions differ from group by? Explain"
+],
+[
+50.798,
+"How do window functions differ from group by? Explain above"
+],
+[
+51.091,
+"How do window functions differ from group by? Explain the bias"
+],
+[
+51.442,
+"How do window functions differ from group by? Explain the buy's variant."
+],
+[
+51.815,
+"How do window functions differ from group by? Explain the BIOS variance track"
+],
+[
+52.138,
+"How do window functions differ from group by? Explain the BIOS variance trade-off"
+],
+[
+52.404,
+"How do window functions differ from group by? Explain the BIOS variance trade-off in your"
+],
+[
+54.07,
+"How do window functions differ from group by? Explain the BIOS variance trade-off in your own words."
+],
+[
+54.662,
+"How do window functions differ from group by? Explain the BIOS variance trade-off in your own words"
+],
+[
+56.07,
+"How do window functions differ from group by? Explain the BIOS variance trade-off in your own words."
+],
+[
+56.724,
+"How do window functions differ from group by? Explain the BIOS variance trade-off in your own words How would you"
+],
+[
+56.883,
+"How do window functions differ from group by?"
+],
+[
+57.006,
+"Explain the BIOS variance trade-off in your own words How would you roll"
+],
+[
+57.287,
+"Explain the bias variance trade-off in your own words. How would you roll back a"
+],
+[
+57.622,
+"Explain the bias variance trade-off in your own words. How would you roll back a bad d"
+],
+[
+57.929,
+"Explain the BIOS variance trade-off in your own words. How would you roll back a bad deployment?"
+],
+[
+58.296,
+"Explain the BIOS variance trade-off in your own words. How would you roll back a bad deployment on"
+],
+[
+58.553,
+"Explain the BIOS variance trade-off in your own words. How would you roll back a bad deployment on Cuba?"
+],
+[
+58.846,
+"Explain the BIOS variance trade-off in your own words. How would you roll back a bad deployment on Kubernetes?"
+]
+]
+}

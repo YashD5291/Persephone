@@ -1,0 +1,901 @@
+{
+"recorded": "2026-10-13, MacWhisper Live Captions (Parakeet v3), 18 synthetic interview questions the stitching rules were not tuned on; the first one came after minutes of silence and MacWhisper showed only stray words for it",
+"marks": [
+3.0,
+12.381,
+20.652,
+29.444,
+36.65,
+45.071,
+52.789,
+59.875,
+66.999,
+73.391,
+81.402,
+89.853,
+96.657,
+105.538,
+112.735,
+119.436,
+127.289,
+134.31
+],
+"snapshots": [
+[
+3.45,
+""
+],
+[
+9.57,
+"Atlan"
+],
+[
+10.199,
+"Shoplum"
+],
+[
+10.709,
+"Atlan"
+],
+[
+11.689,
+""
+],
+[
+11.799,
+"Problem"
+],
+[
+12.218,
+"Poplum"
+],
+[
+12.831,
+""
+],
+[
+12.933,
+"Atlum"
+],
+[
+14.176,
+"How do you"
+],
+[
+14.494,
+"Problem. How do you handle"
+],
+[
+15.127,
+"How do you handle class"
+],
+[
+15.435,
+"How do you handle class embedded"
+],
+[
+15.909,
+"How do you handle class imbalance?"
+],
+[
+16.209,
+"problem. How do you handle class imbalance when the"
+],
+[
+16.518,
+"problem. How do you handle class imbalance when the positive"
+],
+[
+16.825,
+"How do you handle class imbalance when the positive class"
+],
+[
+17.211,
+"How do you handle class imbalance when the positive class is"
+],
+[
+17.55,
+"How do you handle class imbalance when the positive class is very real?"
+],
+[
+18.351,
+"How do you handle class imbalance when the positive class is very rare?"
+],
+[
+21.102,
+"How do you handle class imbalance when the positive class is very rare?"
+],
+[
+21.356,
+"Atlan How do you handle class imbalance when the positive class is very rare?"
+],
+[
+22.154,
+""
+],
+[
+22.698,
+"Walk me through"
+],
+[
+23.035,
+"Walk me through Europe."
+],
+[
+23.359,
+"Walk me through your approach"
+],
+[
+23.663,
+"Walk me through your approach to feel"
+],
+[
+23.976,
+"Walk me through your approach to feature"
+],
+[
+24.283,
+"Walk me through your approach to feature engine"
+],
+[
+24.589,
+"Walk me through your approach to feature engineering"
+],
+[
+24.886,
+"Walk me through your approach to feature engineering for"
+],
+[
+25.216,
+"Walk me through your approach to feature engineering for time."
+],
+[
+25.538,
+"Walk me through your approach to feature engineering for time series."
+],
+[
+25.839,
+"Walk me through your approach to feature engineering for time series"
+],
+[
+26.165,
+"Walk me through your approach to feature engineering for Time Series 4"
+],
+[
+26.47,
+"Walk me through your approach to feature engineering for time series forecast."
+],
+[
+27.29,
+"Walk me through your approach to feature engineering for time series forecasting."
+],
+[
+29.894,
+"Walk me through your approach to feature engineering for time series forecasting."
+],
+[
+31.234,
+"How would you say that?"
+],
+[
+31.472,
+"How would you detect the colour?"
+],
+[
+31.782,
+"How would you detect a"
+],
+[
+32.098,
+"How would you detect data drip"
+],
+[
+32.407,
+"How would you detect data drift after"
+],
+[
+32.731,
+"How would you detect data drift after a mile?"
+],
+[
+33.031,
+"How would you detect data drift after a model has"
+],
+[
+33.332,
+"How would you detect data drift after a model has been"
+],
+[
+33.655,
+"How would you detect data drift after a model has been deployed?"
+],
+[
+37.1,
+"How would you detect data drift after a model has been deployed?"
+],
+[
+38.402,
+"How would you detect data drift after a model has been deployed? What is the"
+],
+[
+38.727,
+"How would you detect data drift after a model has been deployed? What is the difference?"
+],
+[
+39.073,
+"How would you detect data drift after a model has been deployed? What is the difference between"
+],
+[
+39.276,
+"How would you detect data drift after a model has been deployed?"
+],
+[
+39.39,
+"What is the difference between per"
+],
+[
+39.617,
+"What is the difference between precision?"
+],
+[
+39.96,
+"What is the difference between precision and re"
+],
+[
+40.588,
+"What is the difference between precision and recall?"
+],
+[
+40.875,
+"What is the difference between precision and recall and when"
+],
+[
+41.205,
+"What is the difference between precision and recall and when would you"
+],
+[
+41.498,
+"What is the difference between precision and recall and when would you optimize?"
+],
+[
+41.839,
+"What is the difference between precision and recall and when would you optimize for"
+],
+[
+42.191,
+"What is the difference between precision and recall and when would you optimize for eat?"
+],
+[
+43.551,
+"What is the difference between precision and recall and when would you optimize for each?"
+],
+[
+45.521,
+"What is the difference between precision and recall and when would you optimize for each?"
+],
+[
+46.758,
+"What is the difference between precision and recall, and when would you optimize for each?"
+],
+[
+46.865,
+"How would you have a little bit of a little bit of a little bit of a little bit of a little"
+],
+[
+47.107,
+"How would you expect"
+],
+[
+47.43,
+"How would you explain it?"
+],
+[
+47.769,
+"How would you explain a conf"
+],
+[
+48.093,
+"How would you explain a confidence"
+],
+[
+48.408,
+"How would you explain a confidence interval?"
+],
+[
+48.73,
+"How would you explain a confidence interval to no"
+],
+[
+49.03,
+"How would you explain a confidence interval to non-tech?"
+],
+[
+49.355,
+"How would you explain a confidence interval to non-technical"
+],
+[
+49.648,
+"How would you explain a confidence interval to a non-technical stake?"
+],
+[
+49.963,
+"How would you explain a confidence interval to a non-technical stakeholder?"
+],
+[
+53.239,
+"How would you explain a confidence interval to a non-technical stakeholder?"
+],
+[
+54.55,
+"How would you explain a confidence interval to a non-technical stakeholder? What if"
+],
+[
+54.731,
+"How would you explain a confidence interval to a non-technical stakeholder?"
+],
+[
+54.837,
+"What is the di"
+],
+[
+55.08,
+"What is the difference?"
+],
+[
+55.409,
+"What is the difference between"
+],
+[
+55.727,
+"What is the difference between a l"
+],
+[
+56.047,
+"What is the difference between a left G"
+],
+[
+56.356,
+"What is the difference between a left join and"
+],
+[
+56.728,
+"What is the difference between a left join and an inner join?"
+],
+[
+60.325,
+"What is the difference between a left join and an inner join?"
+],
+[
+61.602,
+"What is the difference between a left join and an inner join? Why?"
+],
+[
+61.936,
+"What is the difference between a left join and an inner join? Why would you ch"
+],
+[
+62.252,
+"What is the difference between a left join and an inner join? Why would you choose"
+],
+[
+62.571,
+"What is the difference between a left join and an inner join? Why would you choose Kafka?"
+],
+[
+62.769,
+"What is the difference between a left join and an inner join?"
+],
+[
+62.869,
+"Why would you choose Kafka over a"
+],
+[
+63.158,
+"Why would you choose Kafka over a sim"
+],
+[
+63.468,
+"Why would you choose Kafka over a simple method?"
+],
+[
+63.86,
+"Why would you choose Kafka over a simple message"
+],
+[
+64.185,
+"Why would you choose Kafka over a simple message queue?"
+],
+[
+67.449,
+"Why would you choose Kafka over a simple message queue?"
+],
+[
+68.714,
+"Why would you choose Kafka over a simple message queue? What is"
+],
+[
+69.064,
+"Why would you choose Kafka over a simple message queue? What is over f"
+],
+[
+69.398,
+"Why would you choose Kafka over a simple message queue? What is overfitting a"
+],
+[
+69.701,
+"Why would you choose Kafka over a simple message queue? What is overfitting and how"
+],
+[
+69.933,
+"Why would you choose Kafka over a simple message queue?"
+],
+[
+70.042,
+"What is overfitting and how do ye"
+],
+[
+70.298,
+"What is overfitting and how do you prevent"
+],
+[
+70.6,
+"What is overfitting and how do you prevent it"
+],
+[
+73.129,
+"What is overfitting and how do you prevent it?"
+],
+[
+73.841,
+"What is overfitting and how do you prevent it?"
+],
+[
+75.158,
+"What is overfitting and how do you prevent it? Tell me"
+],
+[
+75.467,
+"What is overfitting and how do you prevent it? Tell me about"
+],
+[
+75.796,
+"What is overfitting and how do you prevent it? Tell me about a"
+],
+[
+76.094,
+"What is overfitting and how do you prevent it? Tell me about a time you"
+],
+[
+76.527,
+"What is overfitting and how do you prevent it? Tell me about a time you had"
+],
+[
+76.734,
+"What is overfitting and how do you prevent it?"
+],
+[
+76.841,
+"Tell me about a time you had too deep"
+],
+[
+77.117,
+"Tell me about a time you had to debug a m"
+],
+[
+77.441,
+"Tell me about a time you had to debug a memory"
+],
+[
+77.809,
+"Tell me about a time you had to debug a memory leak"
+],
+[
+78.141,
+"Tell me about a time you had to debug a memory leak in Pro"
+],
+[
+78.452,
+"Tell me about a time you had to debug a memory leak in production."
+],
+[
+81.852,
+"Tell me about a time you had to debug a memory leak in production"
+],
+[
+82.768,
+"Tell me about a time you had to debug a memory leak in production."
+],
+[
+83.082,
+"Tell me about a time you had to debug a memory leak in production. What?"
+],
+[
+83.388,
+"Tell me about a time you had to debug a memory leak in production. What happened"
+],
+[
+83.625,
+"Tell me about a time you had to debug a memory leak in production."
+],
+[
+83.729,
+"What happens when"
+],
+[
+83.994,
+"What happens when you t"
+],
+[
+84.303,
+"What happens when you type a"
+],
+[
+84.663,
+"What happens when you type a web app"
+],
+[
+85.056,
+"What happens when you type a web address?"
+],
+[
+85.356,
+"What happens when you type a web address into"
+],
+[
+85.683,
+"What happens when you type a web address into the browser"
+],
+[
+86.022,
+"What happens when you type a web address into the browser?"
+],
+[
+86.328,
+"What happens when you type a web address into the browser and"
+],
+[
+86.655,
+"What happens when you type a web address into the browser and press F?"
+],
+[
+86.966,
+"What happens when you type a web address into the browser and press enter?"
+],
+[
+90.303,
+"What happens when you type a web address into the browser and press enter?"
+],
+[
+91.818,
+"How do we"
+],
+[
+92.171,
+"How do window five"
+],
+[
+92.461,
+"How do window function"
+],
+[
+92.784,
+"How do window functions diff"
+],
+[
+93.113,
+"How do window functions differ from"
+],
+[
+93.397,
+"How do window functions differ from group"
+],
+[
+93.719,
+"How do window functions differ from group bar"
+],
+[
+95.142,
+"How do window functions differ from group by?"
+],
+[
+97.107,
+"How do window functions differ from group by?"
+],
+[
+98.468,
+"How do window functions differ from group by? Can you walk?"
+],
+[
+98.79,
+"How do window functions differ from group by? Can you walk me through?"
+],
+[
+99.092,
+"How do window functions differ from group by? Can you walk me through how"
+],
+[
+99.408,
+"How do window functions differ from group by? Can you walk me through how you"
+],
+[
+99.713,
+"How do window functions differ from group by? Can you walk me through how you would des"
+],
+[
+99.94,
+"How do window functions differ from group by?"
+],
+[
+100.025,
+"Can you walk me through how you would design"
+],
+[
+100.311,
+"Can you walk me through how you would design a date"
+],
+[
+100.617,
+"Can you walk me through how you would design a data pattern?"
+],
+[
+100.941,
+"Can you walk me through how you would design a data pipeline?"
+],
+[
+101.311,
+"Can you walk me through how you would design a data pipeline that has"
+],
+[
+101.593,
+"Can you walk me through how you would design a data pipeline that handles"
+],
+[
+101.913,
+"Can you walk me through how you would design a data pipeline that handles late"
+],
+[
+102.231,
+"Can you walk me through how you would design a data pipeline that handles late arrival"
+],
+[
+102.592,
+"Can you walk me through how you would design a data pipeline that handles late arriving if"
+],
+[
+105.0,
+"Can you walk me through how you would design a data pipeline that handles late arriving events?"
+],
+[
+105.988,
+"Can you walk me through how you would design a data pipeline that handles late arriving events?"
+],
+[
+107.433,
+"Explain"
+],
+[
+107.654,
+"Explain the"
+],
+[
+108.033,
+"Explained the bias"
+],
+[
+108.331,
+"Explained the bias variant"
+],
+[
+108.667,
+"Explained the bias variance"
+],
+[
+108.957,
+"Explained the bias variance trade-off"
+],
+[
+109.268,
+"Explained the bias variance trade-off in your"
+],
+[
+109.683,
+"Explained the bias variance trade-off in your own way."
+],
+[
+111.558,
+"Explained the bias variance trade-off in your own words"
+],
+[
+113.185,
+"Explained the bias variance trade-off in your own words"
+],
+[
+114.25,
+"Explained the bias variance trade-off in your own words."
+],
+[
+114.567,
+"Explained the bias variance trade-off in your own words. How would you"
+],
+[
+114.978,
+"Explained the bias variance trade-off in your own words. How would you roll back?"
+],
+[
+115.31,
+"Explained the bias variance trade-off in your own words. How would you roll back a b"
+],
+[
+115.502,
+"Explained the bias variance trade-off in your own words."
+],
+[
+115.636,
+"How would you roll back a bad de"
+],
+[
+115.874,
+"How would you roll back a bad deployment?"
+],
+[
+116.172,
+"How would you roll back a bad deployment on"
+],
+[
+116.49,
+"How would you roll back a bad deployment on Kuba?"
+],
+[
+116.819,
+"How would you roll back a bad deployment on Kubernetes?"
+],
+[
+119.886,
+"How would you roll back a bad deployment on Kubernetes?"
+],
+[
+121.166,
+"How would you roll back a bad deployment on Kubernetes? What does"
+],
+[
+121.48,
+"How would you roll back a bad deployment on Kubernetes? What does he"
+],
+[
+121.788,
+"How would you roll back a bad deployment on Kubernetes? What does it imp?"
+],
+[
+122.124,
+"How would you roll back a bad deployment on Kubernetes? What does ED impotent?"
+],
+[
+122.435,
+"How would you roll back a bad deployment on Kubernetes? What does EDE impotent mean?"
+],
+[
+122.65,
+"How would you roll back a bad deployment on Kubernetes?"
+],
+[
+122.758,
+"What does eat impotent mean?"
+],
+[
+123.009,
+"What does ED impotent mean and why"
+],
+[
+123.333,
+"What does eat impotent mean and why does it"
+],
+[
+123.639,
+"What does eat impotent mean and why does it matter?"
+],
+[
+123.952,
+"What does Edem potent mean and why does it matter for E?"
+],
+[
+124.284,
+"What does Edempotent mean and why does it matter for retrial?"
+],
+[
+125.117,
+"What does Edempotent mean and why does it matter for retries?"
+],
+[
+127.739,
+"What does Edempotent mean and why does it matter for retries?"
+],
+[
+127.925,
+"What does Edem potent mean and why does it matter for retries?"
+],
+[
+129.282,
+"What does Edempotent mean and why does it matter for retries? Can you ex"
+],
+[
+129.524,
+"What does Edempotent mean, and why does it matter for retries?"
+],
+[
+129.631,
+"Can you explain"
+],
+[
+129.868,
+"Can you explain how"
+],
+[
+130.192,
+"Can you explain how a hash"
+],
+[
+130.527,
+"Can you explain how a HashMap has"
+],
+[
+130.907,
+"Can you explain how a hash map handles"
+],
+[
+131.196,
+"Can you explain how a hash map handles collision?"
+],
+[
+132.924,
+"Can you explain how a HashMap handles collisions?"
+],
+[
+134.76,
+"Can you explain how a HashMap handles collisions?"
+],
+[
+135.842,
+"Can you explain how a hash map handles collisions?"
+],
+[
+136.172,
+"Can you explain how a HashMap handles collisions? What track?"
+],
+[
+136.478,
+"Can you explain how a HashMap handles collisions? What trade-offs?"
+],
+[
+136.787,
+"Can you explain how a HashMap handles collisions? What trade-offs would you"
+],
+[
+137.013,
+"Can you explain how a HashMap handles collisions?"
+],
+[
+137.099,
+"What trade-offs would you consider"
+],
+[
+137.386,
+"What trade-offs would you consider between"
+],
+[
+138.041,
+"What trade-offs would you consider between consist"
+],
+[
+138.395,
+"What trade-offs would you consider between consistency"
+],
+[
+138.736,
+"What trade-offs would you consider between consistency and available"
+],
+[
+139.028,
+"What trade-offs would you consider between consistency and availability?"
+]
+]
+}

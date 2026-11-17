@@ -7,16 +7,21 @@
   // Late-bound (defined in modules that load after this one):
   const isContextValid = (...args) => P.isContextValid(...args);
 
+  /**
+   * Plain-text edit of a message that is still being streamed. Resolves with
+   * the background's answer ({ success, retryAfterMs? }) or null if it could
+   * not be asked.
+   */
   function streamEditTelegram(messageId, text) {
-    if (!isContextValid()) return;
+    if (!isContextValid()) return Promise.resolve(null);
     try {
-      chrome.runtime.sendMessage({
+      return chrome.runtime.sendMessage({
         type: MSG.STREAM_EDIT,
         messageId: messageId,
         text: text
-      }).catch(() => {});
+      }).catch(() => null);
     } catch (e) {
-      // Ignore
+      return Promise.resolve(null);
     }
   }
 

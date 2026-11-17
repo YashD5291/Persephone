@@ -131,8 +131,12 @@
 
     // Detect if the page has any AI responses (responseContainer with 0 matches is
     // normal on a fresh/empty conversation — only flag it if responses are visible)
+    // On Claude an answer is the row marked data-testid="assistant-message"
+    // (the same element that carries data-is-streaming). Markdown blocks alone
+    // do not prove an answer is there: they also show before an answer's row
+    // exists, which raised this alarm on pages where nothing was wrong.
     const hasVisibleResponses = SITE === 'claude'
-      ? document.querySelectorAll('.font-claude-response').length > 0
+      ? document.querySelectorAll('[data-testid="assistant-message"], .font-claude-response').length > 0
       : document.querySelectorAll('.response-content-markdown').length > 0;
 
     // Check each SELECTOR_DEFS entry (primary + any active fallback)

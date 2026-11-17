@@ -76,10 +76,51 @@ function handleMessage(request, sender, sendResponse) {
   }
 
   if (request.type === MSG.TOGGLE_WHISPER) {
+    // A stop means a question is about to be answered: open the Telegram
+    // connection now so the first send does not pay for the handshake.
+    if (request.refocus) preconnectTelegramAPI();
     toggleWhisper(request.refocus || false)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
+  }
+
+  if (request.type === MSG.LIVE_TOGGLE) {
+    toggleLiveText(sender.tab?.id)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.type === MSG.LIVE_MARK) {
+    // The box was just emptied, which normally means a question was sent:
+    // warm the Telegram connection for the answer that is about to stream.
+    preconnectTelegramAPI();
+    sendResponse({ success: markLiveQuestion() });
+    return false;
+  }
+
+  if (request.type === MSG.VOICE_TIMING) {
+    recordVoiceTiming(request.record, request.summary);
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (request.type === MSG.LIVE_SET_TARGET) {
+    sendResponse(setLiveTarget(request.tabId));
+    return false;
+  }
+
+  if (request.type === MSG.LIVE_HERE) {
+    liveTextHere(sender.tab?.id)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.type === MSG.LIVE_GET_STATE) {
+    sendResponse(liveStateFor(sender.tab?.id));
+    return false;
   }
 
   if (request.type === MSG.GET_CLIPBOARD) {
@@ -138,7 +179,7 @@ function handleMessage(request, sender, sendResponse) {
           });
         }
       }
-      sendResponse({ tabs: tabList, currentTabId: senderTabId });
+      sendResponse({ tabs: tabList, currentTabId: senderTabId, liveTargetTabId, liveTabId });
     });
     return true;
   }

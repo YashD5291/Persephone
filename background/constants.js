@@ -39,5 +39,18 @@ const MSG = {
 
   // Features
   TOGGLE_WHISPER: 'TOGGLE_WHISPER',
+
+  // Live text (MacWhisper Live Captions -> chat box)
+  LIVE_TOGGLE:     'LIVE_TOGGLE',      // tab -> background: mic pressed, switch live text on/off
+  LIVE_MARK:       'LIVE_MARK',        // tab -> background: start a fresh question
+  LIVE_SET_TARGET: 'LIVE_SET_TARGET',  // tab -> background: choose the chat that receives the text
+  LIVE_HERE:       'LIVE_HERE',        // tab -> background: the page's live button (live text into this chat, or off)
+  LIVE_GET_STATE:  'LIVE_GET_STATE',   // tab -> background: live text state as this tab sees it
+  LIVE_SET_ACTIVE: 'LIVE_SET_ACTIVE',  // background -> tab: you are (not) receiving live text
+  LIVE_SUBMIT:     'LIVE_SUBMIT',      // background -> tab: the user pressed the send shortcut
+  VOICE_TIMING:    'VOICE_TIMING',     // tab -> background: how long one question took, stage by stage
+  LIVE_STATE:      'LIVE_STATE',       // background -> all tabs: on/off and current target
+  LIVE_TEXT:       'LIVE_TEXT',        // background -> tab: question text so far
+  LIVE_STATUS:     'LIVE_STATUS',      // background -> tab: helper / captions problems
   GET_CLIPBOARD:  'GET_CLIPBOARD',
 };

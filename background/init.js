@@ -9,6 +9,8 @@ async function initialize() {
   log.init('Initializing...');
   await loadSettingsCache();
   await loadTabOverrides();
+  await loadLiveTarget();
+  restoreLiveText();
   preconnectTelegramAPI();
   startConnectionKeepAlive();
 }

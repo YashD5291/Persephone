@@ -1,0 +1,608 @@
+{
+"recorded": "2026-10-13, MacWhisper Live Captions (Parakeet v3), synthetic interview questions played into Loopback Audio",
+"marks": [
+0.089
+],
+"snapshots": [
+[
+-0.463,
+"Tell me about a time you had to debug a memory leak in production. Why did you leave your last rule?"
+],
+[
+2.204,
+""
+],
+[
+2.23,
+"What is the difference?"
+],
+[
+2.537,
+"What is the difference between"
+],
+[
+2.844,
+"What is the difference between the"
+],
+[
+3.162,
+"What is the difference between the left"
+],
+[
+3.479,
+"What is the difference between the left joint?"
+],
+[
+3.794,
+"What is the difference between a left joint and an in"
+],
+[
+4.096,
+"What is the difference between a left joint and an inner joint?"
+],
+[
+4.77,
+"What is the difference between a left join and an inner join?"
+],
+[
+5.095,
+"What is the difference between a left join and an inner join? Can you"
+],
+[
+5.42,
+"What is the difference between a left join and an inner join? Can you walk"
+],
+[
+5.728,
+"What is the difference between a left join and an inner join? Can you walk me through?"
+],
+[
+6.036,
+"What is the difference between a left join and an inner join? Can you walk me through how"
+],
+[
+6.337,
+"What is the difference between a left join and an inner join? Can you walk me through how you would"
+],
+[
+6.637,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design?"
+],
+[
+6.969,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a"
+],
+[
+7.446,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data"
+],
+[
+7.745,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline"
+],
+[
+8.07,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that"
+],
+[
+8.395,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles"
+],
+[
+8.712,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles left"
+],
+[
+9.02,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles later on?"
+],
+[
+9.388,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles late arriving"
+],
+[
+9.671,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles late arriving events?"
+],
+[
+10.59,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles late arriving events? How do you"
+],
+[
+10.805,
+"What is the difference between a left join and an inner join? Can you walk me through how you would design a data pipeline that handles late arriving events?"
+],
+[
+10.954,
+"How do you decide b"
+],
+[
+11.27,
+"How do you decide between"
+],
+[
+11.578,
+"How do you decide between a ra"
+],
+[
+11.979,
+"How do you decide between a random"
+],
+[
+12.304,
+"How do you decide between a random forest"
+],
+[
+12.628,
+"How do you decide between a random forest and co"
+],
+[
+12.938,
+"How do you decide between a random forest and grady"
+],
+[
+13.245,
+"How do you decide between a random forest and gradient boo"
+],
+[
+13.553,
+"How do you decide between a random forest and gradient boosting"
+],
+[
+13.871,
+"How do you decide between a random forest and gradient boosting for it"
+],
+[
+14.188,
+"How do you decide between a random forest and gradient boosting for a tab"
+],
+[
+14.49,
+"How do you decide between a random forest and gradient boosting for a tabular p"
+],
+[
+14.803,
+"How do you decide between a random forest and gradient boosting for a tabular problem?"
+],
+[
+15.723,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me"
+],
+[
+16.05,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about"
+],
+[
+16.341,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time"
+],
+[
+16.699,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you have"
+],
+[
+16.983,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to deal"
+],
+[
+17.483,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug"
+],
+[
+17.658,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory"
+],
+[
+17.974,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leap."
+],
+[
+18.299,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leak in"
+],
+[
+18.57,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leak in product."
+],
+[
+18.867,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leak in production."
+],
+[
+19.541,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leak in production. What does"
+],
+[
+19.733,
+"How do you decide between a random forest and gradient boosting for a tabular problem? Tell me about a time you had to debug a memory leak in production."
+],
+[
+19.842,
+"What decided"
+],
+[
+20.13,
+"What decide MPO"
+],
+[
+20.404,
+"What decide impotent"
+],
+[
+21.049,
+"What decide impotent mean?"
+],
+[
+21.25,
+"What decide impotent mean and la"
+],
+[
+21.558,
+"What decide impotent mean and why da"
+],
+[
+21.868,
+"What decide impotent mean and why does it mat"
+],
+[
+22.184,
+"What decide impotent mean and why does it matter for"
+],
+[
+22.509,
+"What decide impotent mean and why does it matter for each"
+],
+[
+22.986,
+"What does idempotent mean and why does it matter for retries"
+],
+[
+23.659,
+"What does id impotent mean and why does it matter for retries? How would you"
+],
+[
+24.067,
+"What does idempotent mean and why does it matter for retries? How would you dit"
+],
+[
+24.318,
+"What does idempotent mean and why does it matter for retries? How would you detect"
+],
+[
+24.617,
+"What does idempotent mean and why does it matter for retries? How would you detect datic"
+],
+[
+24.942,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift"
+],
+[
+25.377,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after"
+],
+[
+25.62,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model"
+],
+[
+25.967,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has"
+],
+[
+26.276,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has been de"
+],
+[
+26.651,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has been deployed"
+],
+[
+27.227,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has been deployed?"
+],
+[
+27.842,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has been deployed? Explain"
+],
+[
+28.034,
+"What does idempotent mean and why does it matter for retries? How would you detect data drift after a model has been deployed?"
+],
+[
+28.143,
+"Explain the bio"
+],
+[
+28.377,
+"Explain the bias fa"
+],
+[
+28.685,
+"Explain the bias variant"
+],
+[
+29.009,
+"Explain the bias variance tray"
+],
+[
+29.303,
+"Explain the bias variance trader"
+],
+[
+29.656,
+"Explain the bias variance trade-off in your"
+],
+[
+30.044,
+"Explain the bias variance trade-off in your own"
+],
+[
+30.359,
+"Explain the bias variance trade-off in your own words"
+],
+[
+31.152,
+"Explain the bias variance trade-off in your own words. Why"
+],
+[
+31.452,
+"Explain the bias variance trade-off in your own words. Why would you ch"
+],
+[
+31.778,
+"Explain the bias variance trade-off in your own words. Why would you choose"
+],
+[
+32.144,
+"Explain the bias variance trade-off in your own words. Why would you choose cough"
+],
+[
+32.453,
+"Explain the bias variance trade-off in your own words. Why would you choose Kough Kindle"
+],
+[
+32.786,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over us?"
+],
+[
+33.077,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over a simple"
+],
+[
+33.375,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over a simple message"
+],
+[
+33.694,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over a simple message Q"
+],
+[
+34.524,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over a simple message queue? What happened"
+],
+[
+34.723,
+"Explain the bias variance trade-off in your own words. Why would you choose Kafkin over a simple message queue?"
+],
+[
+34.848,
+"What happens"
+],
+[
+35.114,
+"what happens when you"
+],
+[
+35.415,
+"what happens when you time"
+],
+[
+35.749,
+"What happens when you type away"
+],
+[
+36.181,
+"what happens when you type a web and"
+],
+[
+36.416,
+"What happens when you type a web address?"
+],
+[
+36.697,
+"What happens when you type a web address into the"
+],
+[
+37.021,
+"What happens when you type a web address into the brown"
+],
+[
+37.378,
+"What happens when you type a web address into the browser and"
+],
+[
+37.708,
+"What happens when you type a web address into the browser and press"
+],
+[
+37.993,
+"What happens when you type a web address into the browser and press enter"
+],
+[
+38.877,
+"What happens when you type a web address into the browser and press enter? How do"
+],
+[
+39.144,
+"What happens when you type a web address into the browser and press enter? How do you"
+],
+[
+39.485,
+"What happens when you type a web address into the browser and press enter? How do you handle"
+],
+[
+39.903,
+"What happens when you type a web address into the browser and press enter? How do you handle cli"
+],
+[
+40.097,
+"What happens when you type a web address into the browser and press enter? How do you handle class and"
+],
+[
+40.629,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance"
+],
+[
+40.99,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the"
+],
+[
+41.265,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive"
+],
+[
+41.572,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class"
+],
+[
+42.069,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class is"
+],
+[
+42.256,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class is very"
+],
+[
+42.973,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class is very rare?"
+],
+[
+43.253,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class is very rare? Can you"
+],
+[
+43.453,
+"What happens when you type a web address into the browser and press enter? How do you handle class imbalance when the positive class is very rare?"
+],
+[
+43.562,
+"Can you ex"
+],
+[
+43.829,
+"Can you explain"
+],
+[
+44.126,
+"Can you explain how"
+],
+[
+44.544,
+"Can you explain how hash"
+],
+[
+44.882,
+"Can you explain how hash map"
+],
+[
+45.182,
+"Can you explain how hash map handle"
+],
+[
+45.482,
+"Can you explain how HashMap handles c"
+],
+[
+45.791,
+"Can you explain how HashMap handles collision"
+],
+[
+46.424,
+"Can you explain how a HashMap handles collisions"
+],
+[
+46.787,
+"Can you explain how HashMap handles collisions? What is"
+],
+[
+47.037,
+"Can you explain how HashMap handles collisions? What is the di"
+],
+[
+47.307,
+"Can you explain how HashMap handles collisions? What is the difference"
+],
+[
+47.593,
+"Can you explain how HashMap handles collisions? What is the difference between"
+],
+[
+48.296,
+"Can you explain how a HashMap handles collisions? What is the difference between precision"
+],
+[
+48.562,
+"Can you explain how HashMap handles collisions? What is the difference between precision and"
+],
+[
+48.854,
+"Can you explain how HashMap handles collisions? What is the difference between precision and recall"
+],
+[
+49.283,
+"Can you explain how a HashMap handles collisions? What is the difference between precision and recall"
+],
+[
+49.556,
+"Can you explain how a hash map handles collisions? What is the difference between precision and recall? And when"
+],
+[
+49.875,
+"Can you explain how a HashMap handles collisions? What is the difference between precision and recall? And when would you"
+],
+[
+50.25,
+"And when would you want them"
+],
+[
+50.549,
+"And when would you or demise"
+],
+[
+50.817,
+"And when would you ord demise for e"
+],
+[
+51.141,
+"And when would you or demise for each"
+],
+[
+51.534,
+"And when would you optimize for each"
+],
+[
+51.858,
+"And when would you or demise for each? How it"
+],
+[
+52.24,
+"And when would you optimize for each? How would you ro"
+],
+[
+52.474,
+"And when would you optimize for each? How would you roll back"
+],
+[
+53.086,
+"And when would you want demise for each? How would you roll back a bad"
+],
+[
+58.691,
+"And when would you want demise for each? How would you roll back a bad deployment"
+],
+[
+64.998,
+"And when would you optimize for each? How would you roll back a bad deployment on Kubernetes? Describe how you would partition a data where"
+]
+]
+}

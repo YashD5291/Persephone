@@ -31,7 +31,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://grok.com/*", "https://x.com/i/grok*", "https://claude.ai/*"],
+      "matches": [
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://claude.ai/*"
+      ],
+      "exclude_matches": [
+        "https://claude.ai/oauth/*",
+        "https://claude.ai/login*",
+        "https://claude.ai/logout*"
+      ],
       "js": [
         "content/constants.js",
         "content/logger.js",
@@ -40,6 +49,7 @@
         "content/text.js",
         "content/telegram.js",
         "content/buttons.js",
+        "content/pacer.js",
         "content/streaming.js",
         "content/voice.js",
         "content/screenshot.js",
@@ -49,5 +59,21 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "commands": {
+    "send-live-question": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+1"
+      },
+      "global": true,
+      "description": "Send the question waiting in the target chat"
+    },
+    "toggle-live-text": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+2"
+      },
+      "global": true,
+      "description": "Live text on/off (text goes to the target chat)"
+    }
+  }
 }

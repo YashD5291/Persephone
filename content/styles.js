@@ -169,6 +169,103 @@
         50% { box-shadow: 0 4px 24px rgba(220, 38, 38, 0.7); transform: scale(1.06); }
       }
 
+      /* Floating Extension Switch (very top of the stack): the whole extension on/off.
+         Same switch as in the settings panel. Grey and green instead of the
+         panel's grey and black, so both states show on a dark page. */
+      .persephone-ext-switch {
+        position: fixed;
+        bottom: 224px;
+        right: 28px;
+        width: 40px;
+        height: 22px;
+        cursor: pointer;
+        z-index: 9999998;
+      }
+      .persephone-ext-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+        position: absolute;
+      }
+      .persephone-ext-track {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: #525252;
+        border-radius: 11px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        transition: background 0.2s;
+      }
+      .persephone-ext-track::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.2s;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+      .persephone-ext-switch input:checked + .persephone-ext-track {
+        background: #22c55e;
+      }
+      .persephone-ext-switch input:checked + .persephone-ext-track::after {
+        transform: translateX(18px);
+      }
+
+      /* Floating Live Text Button (top of the stack): live text into this chat, on/off */
+      .persephone-live-btn {
+        position: fixed;
+        bottom: 172px;
+        right: 28px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: #525252;
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        z-index: 9999998;
+        transition: background 0.2s, transform 0.15s;
+      }
+      .persephone-live-btn:hover {
+        background: #3f3f3f;
+        transform: scale(1.08);
+      }
+      .persephone-live-btn:active {
+        transform: scale(0.95);
+      }
+      .persephone-live-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+      /* Same colours as the mic in the chat list: blue = chosen chat, red = typing here. */
+      .persephone-live-btn.target {
+        background: #1a73e8;
+      }
+      .persephone-live-btn.live {
+        background: #dc2626;
+        animation: persephoneMicPulse 1s ease-in-out infinite;
+      }
+      /* Live text is running, but into another chat. */
+      .persephone-live-btn.elsewhere::after {
+        content: '';
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        width: 10px;
+        height: 10px;
+        background: #dc2626;
+        border-radius: 50%;
+        border: 2px solid #525252;
+        pointer-events: none;
+      }
+
       /* Floating Camera Button */
       .persephone-camera-btn {
         position: fixed;
@@ -462,17 +559,23 @@
 
       /* Settings Panel */
       .persephone-settings-panel {
+        --persephone-panel-bottom: 256px;
         position: fixed;
-        bottom: 176px;
+        bottom: var(--persephone-panel-bottom);
         right: 24px;
         width: 280px;
+        /* Never taller than the room above the buttons: with many chats open
+           the panel scrolls instead of running off the top of the page. */
+        max-height: calc(100vh - var(--persephone-panel-bottom) - 16px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
         background: #fff;
         border-radius: 12px;
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
         z-index: 9999998;
         font-family: system-ui, -apple-system, sans-serif;
         animation: persephonePanelIn 0.2s ease;
-        overflow: hidden;
+        overflow-x: hidden;
       }
       .persephone-settings-panel.hidden {
         display: none;
@@ -484,6 +587,10 @@
 
       /* Panel Header */
       .persephone-panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #fff;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -584,6 +691,35 @@
       .persephone-tab-row:last-child {
         border-bottom: none;
       }
+      .persephone-tab-target {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        margin-right: 8px;
+        padding: 3px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #c4c4c4;
+        cursor: pointer;
+      }
+      .persephone-tab-target:hover {
+        color: #666;
+        background: #f0f0f0;
+      }
+      .persephone-tab-target.active {
+        color: #fff;
+        background: #1a73e8;
+      }
+      .persephone-tab-target.live {
+        color: #fff;
+        background: #e53935;
+      }
+      .persephone-tab-target svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
       .persephone-tab-info {
         display: flex;
         align-items: center;
@@ -663,8 +799,14 @@
         .persephone-camera-btn {
           bottom: 194px;
         }
+        .persephone-live-btn {
+          bottom: 238px;
+        }
+        .persephone-ext-switch {
+          bottom: 290px;
+        }
         .persephone-settings-panel {
-          bottom: 242px;
+          --persephone-panel-bottom: 322px;
         }
       }
     `;

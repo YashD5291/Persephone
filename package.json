@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:live": "swift test --package-path native-host/live",
+    "build:live": "native-host/live/build.sh"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"

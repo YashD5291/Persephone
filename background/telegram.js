@@ -83,30 +83,50 @@ async function handleEditMessage(messageId, newText) {
   return editTelegramMessage(settingsCache.botToken, settingsCache.chatId, messageId, newText);
 }
 
+/** POST one Bot API method and return Telegram's parsed reply. */
+async function telegramPost(botToken, method, payload) {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
+    body: JSON.stringify(payload),
+  });
+  return response.json();
+}
+
+// Telegram refuses an edit whose text is already what the message says. The
+// message is as wanted, so that is a success, not a failure.
+const isUnchangedEdit = (data) => !data.ok && !!data.description?.includes('not modified');
+
 /**
- * Handle lightweight stream edit - no markdown, ignores "not modified"
+ * Lightweight stream edit (a progress edit): no markdown, and it is only sent
+ * when the rate budget has room. Otherwise it returns at once with `waitMs`,
+ * and the page tries again then with whatever the text has become.
  */
 async function handleStreamEdit(messageId, text) {
   if (!await ensureSettings()) {
     return { success: false };
   }
 
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${settingsCache.botToken}/editMessageText`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      keepalive: true,
-      body: JSON.stringify({
-        chat_id: settingsCache.chatId,
-        message_id: messageId,
-        text: text,
-        disable_web_page_preview: true
-      }),
-    });
-    const data = await response.json();
+  const waitMs = progressEditWaitMs();
+  if (waitMs > 0) return { success: false, waitMs };
 
-    if (!data.ok && data.description?.includes('not modified')) {
-      return { success: true };
+  try {
+    noteTelegramCall();
+    const data = await telegramPost(settingsCache.botToken, 'editMessageText', {
+      chat_id: settingsCache.chatId,
+      message_id: messageId,
+      text: text,
+      disable_web_page_preview: true
+    });
+
+    if (isUnchangedEdit(data)) return { success: true };
+
+    // "Too Many Requests": Telegram says how long to wait before the next edit.
+    if (!data.ok && data.error_code === 429) {
+      const retryAfter = data.parameters?.retry_after || 1;
+      noteTelegramRefusal(retryAfter);
+      return { success: false, retryAfterMs: retryAfter * 1000 };
     }
 
     return { success: data.ok };
@@ -154,54 +174,23 @@ async function sendTelegramMessage(botToken, chatId, text) {
     try {
       const useMarkdown = hasMarkdownFormatting(chunk);
 
-      let response;
       let data;
 
+      const send = (payload) => telegramEssentialCall(() => telegramPost(botToken, 'sendMessage', payload));
+
       if (useMarkdown) {
-        response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true, // Reuse connection
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: fullText,
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-          }),
-        });
-        data = await response.json();
+        data = await send({ chat_id: chatId, text: fullText, parse_mode: 'Markdown', disable_web_page_preview: true });
 
         if (!data.ok && data.description?.includes('parse')) {
           log.telegram.warn('Markdown failed, retrying without formatting:', data.description);
-          
-          response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            keepalive: true,
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: fullText.replace(/[*_`~\[\]]/g, ''),
-              disable_web_page_preview: true
-            }),
-          });
-          data = await response.json();
+          data = await send({ chat_id: chatId, text: fullText.replace(/[*_`~\[\]]/g, ''), disable_web_page_preview: true });
         }
       } else {
-        response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true,
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: fullText,
-            disable_web_page_preview: true
-          }),
-        });
-        data = await response.json();
+        data = await send({ chat_id: chatId, text: fullText, disable_web_page_preview: true });
       }
 
       if (!data.ok) {
-        log.telegram.error('Telegram API error:', data);
+        log.telegram.error('Telegram API error:', data.description || JSON.stringify(data));
         return { success: false, error: data.description || 'Unknown error' };
       }
 
@@ -232,58 +221,28 @@ async function sendTelegramMessage(botToken, chatId, text) {
 async function editTelegramMessage(botToken, chatId, messageId, newText) {
   try {
     const useMarkdown = hasMarkdownFormatting(newText);
-    
-    let response;
+    const edit = (payload) => telegramEssentialCall(() => telegramPost(botToken, 'editMessageText', payload));
+
     let data;
 
     if (useMarkdown) {
-      response = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: messageId,
-          text: newText,
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true
-        }),
-      });
-      data = await response.json();
+      data = await edit({ chat_id: chatId, message_id: messageId, text: newText, parse_mode: 'Markdown', disable_web_page_preview: true });
 
       if (!data.ok && data.description?.includes('parse')) {
         log.telegram.warn('Markdown failed on edit, retrying without formatting');
-        
-        response = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true,
-          body: JSON.stringify({
-            chat_id: chatId,
-            message_id: messageId,
-            text: newText.replace(/[*_`~\[\]]/g, ''),
-            disable_web_page_preview: true
-          }),
-        });
-        data = await response.json();
+        data = await edit({ chat_id: chatId, message_id: messageId, text: newText.replace(/[*_`~\[\]]/g, ''), disable_web_page_preview: true });
       }
     } else {
-      response = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: messageId,
-          text: newText,
-          disable_web_page_preview: true
-        }),
-      });
-      data = await response.json();
+      data = await edit({ chat_id: chatId, message_id: messageId, text: newText, disable_web_page_preview: true });
+    }
+
+    if (isUnchangedEdit(data)) {
+      log.telegram('Message already says this; nothing to edit');
+      return { success: true };
     }
 
     if (!data.ok) {
-      log.telegram.error('Edit error:', data);
+      log.telegram.error('Edit error:', data.description || JSON.stringify(data));
       return { success: false, error: data.description || 'Failed to edit message' };
     }
 

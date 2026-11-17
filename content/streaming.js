@@ -7,7 +7,7 @@
     shouldSkipAutoSend, processContainer, extractText, hashText,
     findFirstContentElement, MSG,
     isContextValid, sendToTelegram, editInTelegram, streamEditTelegram, showToast,
-    createActionButtonGroup, triggerPreconnect, splitAtWordBoundary
+    createActionButtonGroup, triggerPreconnect, splitAtWordBoundary, createEditPacer
   } = P;
 
   /**
@@ -156,6 +156,84 @@
   // LIVE STREAM FIRST CHUNK
   // ============================================
 
+  // Shortest time between two edits of the Telegram message being streamed.
+  // Telegram limits how often a chat can be written to; edits closer together
+  // than this risk a "too many requests" pause that costs far more than it saves.
+  const STREAM_EDIT_MIN_GAP_MS = 300;
+  // Gap used for the rest of a message once Telegram has asked to slow down.
+  const STREAM_EDIT_SLOW_GAP_MS = 1000;
+  // How often to re-check for changes the observer might not report.
+  const STREAM_SAFETY_CHECK_MS = 250;
+
+  // A voice question older than this is not the one being answered now.
+  const VOICE_TIMING_MAX_AGE_MS = 60000;
+
+  /**
+   * Report where the time went for a voice question, up to the first words
+   * in Telegram. Logged once per question, so the pipeline can be measured on
+   * every real question instead of with a stopwatch.
+   *
+   * `firstText` and `telegram` are `{ perf, epoch }` readings: dictation
+   * marks are taken in this page (performance.now), live-text marks partly in
+   * the background worker (Date.now), so each mode uses its own clock.
+   */
+  function reportVoiceTiming(firstText, telegram) {
+    const timing = state.voiceTiming;
+    state.voiceTiming = null;
+    if (!timing) return;
+    if (timing.mode === 'live') return reportLiveTiming(timing, firstText.epoch, telegram.epoch);
+
+    if (!timing.submit || firstText.perf - timing.submit > VOICE_TIMING_MAX_AGE_MS) return;
+    const ms = (from, to) => `${Math.round(to - from)}ms`;
+    log.streaming(
+      `⏱ stop click→key pressed ${ms(timing.clicked, timing.stop)}` +
+      ` | key pressed→transcript ${ms(timing.stop, timing.transcript)}` +
+      ` | transcript→submitted ${ms(timing.transcript, timing.submit)}` +
+      ` | submitted→first words ${ms(timing.submit, firstText.perf)}` +
+      ` | first words→Telegram ${ms(firstText.perf, telegram.perf)}` +
+      ` | total ${ms(timing.clicked, telegram.perf)}`
+    );
+  }
+
+  /**
+   * Live text: the question was already typed when it was sent, so the
+   * stages are the user's own press, the hand-over to Claude, Claude's time
+   * to its first words, and Telegram.
+   */
+  function reportLiveTiming(timing, firstTextAt, telegramAt) {
+    if (firstTextAt - timing.submittedAt > VOICE_TIMING_MAX_AGE_MS) return;
+
+    const sentAt = timing.pressedAt ?? timing.submittedAt;
+    const record = {
+      at: new Date(telegramAt).toISOString(),
+      // Last word heard -> send pressed: the user's own decision time.
+      lastWordToSendMs: timing.lastTextAt != null ? Math.round(sentAt - timing.lastTextAt) : null,
+      // Send pressed -> question handed to Claude (null when Enter was pressed in the tab).
+      sendToSubmittedMs: timing.pressedAt != null ? Math.round(timing.submittedAt - timing.pressedAt) : null,
+      submittedToFirstWordsMs: Math.round(firstTextAt - timing.submittedAt),
+      firstWordsToTelegramMs: Math.round(telegramAt - firstTextAt),
+      sendToTelegramMs: Math.round(telegramAt - sentAt),
+    };
+    const show = (value) => (value == null ? 'n/a' : `${value}ms`);
+    log.streaming(
+      `⏱ live: last word→send ${show(record.lastWordToSendMs)}` +
+      ` | send→submitted ${show(record.sendToSubmittedMs)}` +
+      ` | submitted→first words ${show(record.submittedToFirstWordsMs)}` +
+      ` | first words→Telegram ${show(record.firstWordsToTelegramMs)}` +
+      ` | send→Telegram ${show(record.sendToTelegramMs)}`
+    );
+
+    const seconds = (value) => (value / 1000).toFixed(1);
+    const summary = `Telegram in ${seconds(record.sendToTelegramMs)} s (Claude ${seconds(record.submittedToFirstWordsMs)} s)`;
+    if (isContextValid()) {
+      try {
+        chrome.runtime.sendMessage({ type: MSG.VOICE_TIMING, record, summary }).catch(() => {});
+      } catch (e) {
+        // The record is a convenience; never let it disturb the stream.
+      }
+    }
+  }
+
   /**
    * Wait for the first content element in a container to have enough text.
    * Resolves with the element, or null if streaming ends first.
@@ -163,34 +241,38 @@
   function waitForFirstElement(container, minChars) {
     return new Promise((resolve) => {
       let resolved = false;
+      let pollTimer = null;
       const findContent = () => findFirstContentElement(container);
 
+      const finish = (el) => {
+        resolved = true;
+        observer.disconnect();
+        clearTimeout(pollTimer);
+        resolve(el);
+      };
+
       const startTime = Date.now();
-      const check = () => {
+      // `repoll` is false when called from the observer, so each change does
+      // not start another timer chain.
+      const check = (repoll) => {
         if (resolved) return;
         const el = findContent();
         if (el) {
           const text = extractText(el);
-          if (text && text.length >= minChars) {
-            resolved = true;
-            resolve(el);
-            return;
-          }
+          if (text && text.length >= minChars) return finish(el);
         }
-        if (!isElementStreaming(container)) {
-          resolved = true;
-          resolve(el || null);
-          return;
-        }
+        if (!isElementStreaming(container)) return finish(el || null);
         // Safety: give up after 120s (thinking + web search can take a while)
-        if (Date.now() - startTime > 120000) {
-          resolved = true;
-          resolve(el || null);
-          return;
-        }
-        setTimeout(check, 50);
+        if (Date.now() - startTime > 120000) return finish(el || null);
+        if (repoll) pollTimer = setTimeout(() => check(true), 50);
       };
-      check();
+
+      // The observer fires the instant text is added, and keeps firing in a
+      // tab that is not in front, where Chrome slows the timer below to once
+      // a second or worse. The timer stays as a safety net.
+      const observer = new MutationObserver(() => check(false));
+      observer.observe(container, { childList: true, subtree: true, characterData: true });
+      check(true);
     });
   }
 
@@ -215,19 +297,23 @@
     // Mark immediately to prevent duplicates
     state.autoSentContainers.add(streamContainerId);
 
-    // Wait for first content element with enough text
-    const firstElement = await waitForFirstElement(container, 10);
+    // Wait for the first text of the answer. Any text at all: Claude often
+    // opens with a piece of only a few characters and then pauses for about a
+    // second, and waiting for more would hold the whole message back that long.
+    const firstElement = await waitForFirstElement(container, 1);
     if (!firstElement) {
       log.streaming.warn('⚠️ Live stream: no content element found');
       return;
     }
 
     let lastSentText = extractText(firstElement);
-    if (!lastSentText || lastSentText.length < 5) return;
+    if (!lastSentText) return;
+    const firstText = { perf: performance.now(), epoch: Date.now() };
 
     // Send initial text
     log.streaming('📡 Live stream: sending initial text...');
     const result = await sendToTelegram(lastSentText);
+    if (result.success) reportVoiceTiming(firstText, { perf: performance.now(), epoch: Date.now() });
 
     if (!result.success) {
       log.streaming.warn('⚠️ Live stream: initial send failed');
@@ -251,8 +337,20 @@
     let frozenChunks = [];       // Text of each finalized chunk
     let lastSentActiveText = lastSentText; // Last text sent/edited to active (last) message
 
-    // Anchor: first ~50 chars of initial text, used to verify element identity
-    const textAnchor = lastSentText.substring(0, 50);
+    // Anchor: how the paragraph starts, used to recognise it again after Claude
+    // rebuilds its DOM. Plain text rather than the Telegram-formatted text,
+    // because a bold word that is still being typed changes its markers
+    // ("*Kaf*" then "*Kafka* is") while its plain text only grows.
+    const ANCHOR_CHARS = 30;
+    const plainText = (el) => (el?.textContent || '').trim();
+    let anchor = plainText(firstElement).substring(0, ANCHOR_CHARS);
+    const isSameParagraph = (el) => plainText(el).startsWith(anchor);
+    // The first text can be a single word; lengthen the anchor as more arrives.
+    const growAnchor = () => {
+      if (anchor.length >= ANCHOR_CHARS || !firstElement.isConnected) return;
+      const text = plainText(firstElement);
+      if (text.startsWith(anchor)) anchor = text.substring(0, ANCHOR_CHARS);
+    };
 
     /**
      * Split text into all WORD_SPLIT_THRESHOLD-word chunks.
@@ -295,19 +393,15 @@
      * Tries: original element → new first <p> in container (after DOM rebuild) → lastSentText
      */
     const getFinalText = () => {
-      const anchor = textAnchor.substring(0, 30);
-
       // 1. Try original element (works if still connected, or detached with frozen text)
       const origText = extractText(firstElement);
-      if (origText && origText.startsWith(anchor)) {
+      if (origText && isSameParagraph(firstElement)) {
         // If element is detached, text may be stale — check container for a fresher version
         if (!firstElement.isConnected) {
           const newFirst = findFirstContentElement(container);
-          if (newFirst) {
+          if (newFirst && isSameParagraph(newFirst)) {
             const newText = extractText(newFirst);
-            if (newText && newText.startsWith(anchor)) {
-              return newText.length >= origText.length ? newText : origText;
-            }
+            if (newText) return newText.length >= origText.length ? newText : origText;
           }
         }
         return origText;
@@ -315,9 +409,9 @@
 
       // 2. Original element is stale/reused — try container's current first real content node
       const newFirst = findFirstContentElement(container);
-      if (newFirst) {
+      if (newFirst && isSameParagraph(newFirst)) {
         const newText = extractText(newFirst);
-        if (newText && newText.startsWith(anchor)) return newText;
+        if (newText) return newText;
       }
 
       // 3. Fall back to last streamed text
@@ -386,8 +480,9 @@
     const finalize = async () => {
       if (streamFinalized) return;
       streamFinalized = true;
-      clearInterval(streamInterval);
-      clearInterval(stopCheckInterval);
+      pacer.stop();
+      changeObserver.disconnect();
+      clearInterval(safetyCheck);
 
       const fullText = getFinalText();
       if (!fullText || fullText.length < 5) return;
@@ -480,51 +575,77 @@
       }
     };
 
-    // Poll and edit every 500ms
-    const anchor = textAnchor.substring(0, 30);
-    const streamInterval = setInterval(async () => {
-      if (streamFinalized || splitting) return;
+    /**
+     * Send the paragraph's current text to Telegram. Called by the pacer,
+     * which decides when. Returns null when there was nothing new to send,
+     * otherwise Telegram's answer so the pacer can slow down if asked to.
+     */
+    const sendLatest = async () => {
+      if (streamFinalized || splitting) return null;
 
       const text = extractText(firstElement);
-      if (!text || !text.startsWith(anchor) || text === lastSentText) return;
-
-      lastSentText = text;
+      if (!text || !isSameParagraph(firstElement) || text === lastSentText) return null;
+      growAnchor();
 
       // Check if active portion exceeds threshold — need to split
       const activeText = getActiveText(text);
-      const parts = splitAtWordBoundary(activeText, WORD_SPLIT_THRESHOLD);
-      if (parts) {
+      if (splitAtWordBoundary(activeText, WORD_SPLIT_THRESHOLD)) {
+        lastSentText = text;
         splitting = true;
         try {
           await performSplit(text);
         } finally {
           splitting = false;
         }
-        return;
+        // The split wrote to Telegram, so it counts as a send for pacing.
+        return { success: true };
       }
 
-      // Regular stream edit to active (last) message
+      // Regular stream edit to active (last) message. The text only counts as
+      // sent once Telegram has taken it: an edit that was held back or refused
+      // must still go out, on the next try or with the final edit. (Marking it
+      // sent beforehand left the Telegram message on an older text for good.)
       const activeMsgId = messages[messages.length - 1].id;
-      if (frozenChunks.length > 0) {
-        if (activeText && activeText.length > 0) {
-          lastSentActiveText = activeText;
-          streamEditTelegram(activeMsgId, activeText);
-        }
-      } else {
-        streamEditTelegram(activeMsgId, text);
+      const split = frozenChunks.length > 0;
+      if (split && !activeText) return null;
+      const result = await streamEditTelegram(activeMsgId, split ? activeText : text);
+      if (result?.success) {
+        lastSentText = text;
+        if (split) lastSentActiveText = activeText;
       }
-    }, 500);
+      return result;
+    };
 
-    // Watch for stop conditions (paragraph complete or streaming ended)
-    // Also skip if a split is in progress — let performSplit finish before finalizing
-    const stopCheckInterval = setInterval(() => {
+    const pacer = createEditPacer({
+      send: sendLatest,
+      minGapMs: STREAM_EDIT_MIN_GAP_MS,
+      slowGapMs: STREAM_EDIT_SLOW_GAP_MS,
+    });
+
+    // Stop conditions: paragraph complete or streaming ended.
+    // Skipped while a split is in progress — let performSplit finish before finalizing.
+    const finalizeIfDone = () => {
       if (streamFinalized || splitting) return;
-      const containerDone = !isElementStreaming(container);
-      const elementDone = !isElementStreaming(firstElement);
-      if (containerDone || elementDone) {
-        finalize();
-      }
-    }, 100);
+      if (!isElementStreaming(container) || !isElementStreaming(firstElement)) finalize();
+    };
+
+    // Every change to the answer is pushed as it happens, and the end of the
+    // paragraph is noticed the same way. No clock in between: a clock adds its
+    // own delay, and Chrome slows clocks in tabs that are not in front.
+    const onAnswerChanged = () => {
+      if (streamFinalized) return;
+      pacer.request();
+      finalizeIfDone();
+    };
+    const changeObserver = new MutationObserver(onAnswerChanged);
+    changeObserver.observe(container, {
+      childList: true, subtree: true, characterData: true,
+      attributes: true, attributeFilter: ['data-is-streaming', 'class'],
+    });
+    // Safety net for anything the observer does not report.
+    const safetyCheck = setInterval(onAnswerChanged, STREAM_SAFETY_CHECK_MS);
+    // Text may have arrived while the first message was being sent.
+    onAnswerChanged();
 
     // Safety: finalize after 60 seconds no matter what
     setTimeout(() => finalize(), 60000);

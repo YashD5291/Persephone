@@ -8,7 +8,7 @@
     removeAllButtons, processContainer, checkForNewResponse, startGlobalObserver, sendToTelegram, 
     editInTelegram, showToast, triggerPreconnect, loadSettings, toggleExtensionEnabled, 
     showExtensionIndicator, toggleAutoSend, showAutoSendIndicator, updateWidgetStates, 
-    injectStyles, injectMicButton, injectSettingsWidget, injectScreenshotButton, handleMicClick, 
+    injectStyles, injectMicButton, injectLiveButton, injectSettingsWidget, injectExtensionSwitch, injectScreenshotButton, handleMicClick, 
     insertTextAndSubmit, dataUrlToBlob, pasteScreenshotIntoChat
   } = P;
 
@@ -36,6 +36,7 @@
         autoSubmitVoice: state.autoSubmitVoice,
         voiceAutoRestart: state.voiceAutoRestart,
         voiceRestartDelay: state.voiceRestartDelay,
+        voiceLiveCaptions: state.voiceLiveCaptions,
         autoSendSkipKeywords: state.autoSendSkipKeywords,
       },
 
@@ -96,7 +97,9 @@
 
     injectStyles();
     injectMicButton();
+    injectLiveButton();
     injectSettingsWidget();
+    injectExtensionSwitch();
     injectScreenshotButton();
 
     // Load settings — await so observers start with correct state
@@ -208,6 +211,26 @@
       if (request.type === MSG.INSERT_AND_SUBMIT) {
         insertTextAndSubmit(request.text, { focusInput: false });
       }
+      if (request.type === MSG.LIVE_SET_ACTIVE) {
+        P.setLiveActive(request.active === true);
+        // The background waits for this to know the tab is alive.
+        sendResponse({ success: true });
+        return false;
+      }
+      if (request.type === MSG.LIVE_SUBMIT) {
+        sendResponse(P.submitLiveQuestion(request));
+        return false;
+      }
+      if (request.type === MSG.LIVE_TEXT) {
+        P.handleLiveText(request.text);
+      }
+      if (request.type === MSG.LIVE_STATUS) {
+        P.handleLiveStatus(request.state, request.error);
+      }
+      if (request.type === MSG.LIVE_STATE) {
+        P.handleLiveState(request);
+        updateWidgetStates();
+      }
       if (request.type === MSG.PASTE_SCREENSHOT) {
         const blob = dataUrlToBlob(request.dataUrl);
 
@@ -256,6 +279,9 @@
       }
       if (changes.voiceRestartDelay) {
         state.voiceRestartDelay = changes.voiceRestartDelay.newValue || 3;
+      }
+      if (changes.voiceLiveCaptions) {
+        state.voiceLiveCaptions = changes.voiceLiveCaptions.newValue === true;
       }
       if (changes.splitThreshold) {
         state.splitThreshold = changes.splitThreshold.newValue || 250;
