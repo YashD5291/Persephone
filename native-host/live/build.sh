@@ -23,9 +23,16 @@ if [ -z "$IDENTITY" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' 'NF >= 3 { print $2; exit }')"
 fi
 
-if [ -n "$IDENTITY" ]; then
-  codesign --force --sign "$IDENTITY" --identifier com.persephone.live "$BINARY"
+if [ -n "$IDENTITY" ] && codesign --force --sign "$IDENTITY" --identifier com.persephone.live "$BINARY"; then
   echo "Signed with \"$IDENTITY\". Accessibility permission will survive future rebuilds."
+elif [ -n "$IDENTITY" ]; then
+  # Usually a locked keychain, e.g. when installing over SSH. The helper still
+  # works signed ad hoc; run the installer again at the Mac itself to sign it
+  # properly.
+  codesign --force --sign - --identifier com.persephone.live "$BINARY"
+  echo "WARNING: could not sign with \"$IDENTITY\" (keychain locked? e.g. over SSH)."
+  echo "         Signed ad hoc instead: it works, but after a rebuild macOS will ask"
+  echo "         for Accessibility again. Run ./install.sh at the Mac itself to sign it properly."
 else
   echo "WARNING: no code-signing identity found, the helper is unsigned."
   echo "         After every rebuild you will have to remove \"persephone-live\" from"
